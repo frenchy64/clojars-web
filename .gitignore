@@ -26,6 +26,7 @@ home
 
 .clj-kondo/*
 !.clj-kondo/config.edn
-!.clj-kondo/imports
+!.clj-kondo/imports/hiccup
+!.clj-kondo/imports/kerodon
 bin/.cache
 .cpcache
