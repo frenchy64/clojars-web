@@ -25,7 +25,7 @@
     <dependency>
       <groupId>com.cognitect.aws</groupId>
       <artifactId>api</artifactId>
-      <version>0.8.692</version>
+      <version>0.8.741</version>
       <exclusions>
         <exclusion>
           <groupId>com.cognitect</groupId>
