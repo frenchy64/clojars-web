@@ -4,7 +4,7 @@ check:
 
 .PHONY: lint
 lint:
-	./bin/clj-kondo --lint src test
+	./bin/lint
 
 .PHONY: migrate-db
 migrate-db:
@@ -41,3 +41,15 @@ typos:
 .PHONY: uberjar
 uberjar:
 	clojure -T:build uberjar
+
+.PHONY: sync-dependabot
+sync-dependabot:
+	./bin/sync-dependabot
+
+.PHONY: check-dependabot
+check-dependabot:
+	./bin/check-dependabot
+
+.PHONY: tree
+tree:
+	clojure -A:defaults -Stree
