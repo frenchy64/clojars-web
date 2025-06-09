@@ -2,9 +2,9 @@
 
 set -euo pipefail
 
-clojure -A:defaults -Spom
+clojure -Spom
 mkdir -p dependabot
 mv pom.xml dependabot
 
-clojure -A:defaults -X:deps list > dependabot/deps-list.txt
-clojure -A:defaults -X:deps tree > dependabot/deps-tree.txt
+clojure -X:deps list > dependabot/deps-list.txt
+clojure -X:deps tree > dependabot/deps-tree.txt
