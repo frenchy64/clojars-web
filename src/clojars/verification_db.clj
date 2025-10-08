@@ -30,12 +30,12 @@
 (def VERIFICATION-METHOD-MANUAL "manual")
 
 (defn add-jar-verification
-  "Record verification status for a jar version."
+  "Record verification status for a jar version.
+   Uses UPSERT to handle cases where a verification record already exists."
   [db {:keys [group-name jar-name version verification-status
               verification-method repo-url commit-sha commit-tag
               attestation-url reproducibility-script-url verification-notes]}]
-  (sql/insert! db :jar_verifications
-               {:group_name group-name
+  (let [record {:group_name group-name
                 :jar_name jar-name
                 :version version
                 :verification_status verification-status
@@ -46,7 +46,29 @@
                 :attestation_url attestation-url
                 :reproducibility_script_url reproducibility-script-url
                 :verification_notes verification-notes
-                :verified_at (db/get-time)}))
+                :verified_at (db/get-time)}]
+    ;; Use raw SQL for UPSERT since next.jdbc doesn't have direct support
+    (sql/query db
+               [(str "INSERT INTO jar_verifications "
+                     "(group_name, jar_name, version, verification_status, "
+                     "verification_method, repo_url, commit_sha, commit_tag, "
+                     "attestation_url, reproducibility_script_url, verification_notes, verified_at) "
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                     "ON CONFLICT (group_name, jar_name, version) "
+                     "DO UPDATE SET "
+                     "verification_status = EXCLUDED.verification_status, "
+                     "verification_method = EXCLUDED.verification_method, "
+                     "repo_url = EXCLUDED.repo_url, "
+                     "commit_sha = EXCLUDED.commit_sha, "
+                     "commit_tag = EXCLUDED.commit_tag, "
+                     "attestation_url = EXCLUDED.attestation_url, "
+                     "reproducibility_script_url = EXCLUDED.reproducibility_script_url, "
+                     "verification_notes = EXCLUDED.verification_notes, "
+                     "verified_at = EXCLUDED.verified_at")
+                group-name jar-name version verification-status
+                verification-method repo-url commit-sha commit-tag
+                attestation-url reproducibility-script-url verification-notes
+                (:verified_at record)])))
 
 (defn update-jar-verification
   "Update verification status for a jar version."
