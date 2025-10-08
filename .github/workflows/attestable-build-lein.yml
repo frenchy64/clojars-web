@@ -1,47 +1,56 @@
-# Clojars Attestable Build Workflow for tools.build Projects
+# Clojars Reusable Attestable Build Workflow for Leiningen Projects
 #
-# This workflow provides a secure, reproducible build pipeline with full provenance tracking.
-# It uses a multi-job pipeline to:
+# This is a reusable workflow maintained by Clojars that provides secure, reproducible
+# builds with full provenance tracking. Clojars trusts and accepts attestations from this workflow.
+#
+# USAGE: Call this workflow from your repository's workflow:
+#
+# ```yaml
+# name: Release
+# on:
+#   push:
+#     tags: ['v*']
+# jobs:
+#   build:
+#     uses: clojars/clojars-web/.github/workflows/attestable-build-lein.yml@main
+#     with:
+#       java-version: '${{ inputs.java-version }}'
+# ```
+#
+# This workflow uses a multi-job pipeline to:
 # 1. Download and verify dependencies in isolation
 # 2. Build artifacts offline with verified dependencies
 # 3. Analyze build provenance and verify all source files
-#
-# To use this workflow:
-# 1. Copy it to .github/workflows/release.yml in your project
-# 2. Update the Java version if needed
-# 3. Ensure your build configuration version matches your git tag
-# 4. Push a version tag (e.g., v1.0.0) to trigger the build
+# 4. Generate attestation ONLY after verification passes
 #
 # Note: This workflow does NOT deploy to Clojars automatically.
-# Deployment should only happen after full attestation is complete.
-#
-# TODO: Establish conventions for expected tools/aliases in projects
-# - Currently assumes `-T:build jar` for building JARs
-# - May need to standardize alias names across ecosystem (e.g., :build, :deploy)
-# - Consider supporting alternative build aliases or auto-detection
-#
-# TODO: Handle gitlibs reproducibility concerns
-# - Gitlibs may produce non-reproducible artifacts during prep
-# - Need to record each gitlib's commit hash
-# - Need to checksum generated artifacts in gitlibs during prep
-# - Consider creating minimal gitlibs cache similar to Maven cache
-# - Verify gitlibs checksums across all jobs
+# Deployment should only happen after full attestation is complete and verified.
 
-name: Attestable Release Build (tools.build)
+name: Attestable Leiningen Build (Clojars Trusted)
 
 on:
-  push:
-    tags:
-      - 'v*'  # Trigger on version tags like v1.0.0
-  workflow_dispatch:  # Allow manual triggering
+  workflow_call:
+    inputs:
+      java-version:
+        description: 'Java version to use for the build'
+        required: false
+        default: '21'
+        type: string
+      lein-version:
+        description: 'Leiningen version to use'
+        required: false
+        default: '2.12.0'
+        type: string
 
 env:
-  # Pinned Clojure CLI version for reproducibility
-  CLOJURE_VERSION: "1.12.3.1577"
-  # Immutable URL for the Clojure CLI installer (pinned to version tag)
-  CLOJURE_INSTALLER_URL: "https://github.com/clojure/brew-install/releases/download/1.12.3.1577/linux-install.sh"
-  # SHA256 of the linux-install.sh script from the pinned version
-  CLOJURE_INSTALLER_SHA256: "a55106244ca93ef7b61309e9dca4b248257685870824a8abe2efa706ede8241f"
+  # Pinned Leiningen version for reproducibility
+  LEIN_VERSION: ${{ inputs.lein-version }}
+  # Immutable URL for the lein installer (pinned to version tag, not 'stable' branch)
+  LEIN_INSTALLER_URL: "https://raw.githubusercontent.com/technomancy/leiningen/${{ inputs.lein-version }}/bin/lein"
+  # SHA256 of the lein installer script from the pinned version
+  LEIN_INSTALLER_SHA256: "f8e1266c0c78c08bd4af6e111889ecc316c9dd56d1e8645bbee6c1703d351bc3"
+  # Profile configuration to exclude user, test, and dev profiles for reproducibility
+  LEIN_PROFILES: "with-profile -user,-test,-dev"
 
 jobs:
   # Job 1: Download and cache dependencies in isolation
@@ -57,72 +66,49 @@ jobs:
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: '${{ inputs.java-version }}'
           distribution: 'temurin'
       
-      - name: Download and verify Clojure CLI installer
+      - name: Download and verify Leiningen installer
         run: |
-          # Download Clojure CLI installer from immutable version tag
-          curl -sL "$CLOJURE_INSTALLER_URL" -o install-clojure.sh
+          # Download the official Leiningen installer script from immutable version tag
+          curl -sL "$LEIN_INSTALLER_URL" -o lein
           
           # Verify the SHA256 checksum of the installer
-          echo "$CLOJURE_INSTALLER_SHA256  install-clojure.sh" | sha256sum -c - || {
-            echo "ERROR: Clojure CLI installer checksum verification failed!"
-            echo "Expected: $CLOJURE_INSTALLER_SHA256"
-            echo "Got: $(sha256sum install-clojure.sh | cut -d' ' -f1)"
+          echo "$LEIN_INSTALLER_SHA256  lein" | sha256sum -c - || {
+            echo "ERROR: Leiningen installer checksum verification failed!"
+            echo "Expected: $LEIN_INSTALLER_SHA256"
+            echo "Got: $(sha256sum lein | cut -d' ' -f1)"
             exit 1
           }
           
-          chmod +x install-clojure.sh
-      
-      - name: Install Clojure CLI
-        run: |
-          # Install Clojure CLI
-          sudo ./install-clojure.sh
+          # Make executable and move to PATH
+          chmod +x lein
+          mkdir -p ~/.local/bin
+          mv lein ~/.local/bin/
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
           
-          clojure --version
-          
-          # Save Clojure installation for later jobs
-          mkdir -p /tmp/clojure-install
-          cp install-clojure.sh /tmp/clojure-install/
-          
-          # Copy installed Clojure CLI files
-          if [[ -d /usr/local/lib/clojure ]]; then
-            cp -r /usr/local/lib/clojure /tmp/clojure-install/
-          fi
-          if [[ -f /usr/local/bin/clojure ]]; then
-            cp /usr/local/bin/clojure /tmp/clojure-install/
-          fi
-          if [[ -f /usr/local/bin/clj ]]; then
-            cp /usr/local/bin/clj /tmp/clojure-install/
-          fi
-      
-      - name: Calculate Clojure installation checksums
-        run: |
-          cd /tmp/clojure-install
-          find . -type f -exec sha256sum {} \; | sort > /tmp/clojure-checksums.txt
-          echo "Clojure installation checksums calculated"
-          cat /tmp/clojure-checksums.txt
+          # Note: The lein installer contains its own checksum (LEIN_CHECKSUM)
+          # that verifies the lein uberjar on first call. This is at:
+          # export LEIN_CHECKSUM='b721a573af631784f27ccb52e719e6d1287d9d3951ad56d316d38f7ecfa81aa2'
       
       - name: Download dependencies
         run: |
-          # Download all dependencies
-          clojure -P -T:build
+          # Download all dependencies with minimal profiles
+          lein $LEIN_PROFILES deps
           
-          echo "Dependencies downloaded to ~/.m2/repository and ~/.gitlibs"
+          echo "Dependencies downloaded to ~/.m2/repository"
       
       - name: Identify required dependencies
         run: |
           # Get the classpath to see which JARs are actually used
-          CLASSPATH=$(clojure -Spath -T:build)
+          CLASSPATH=$(lein $LEIN_PROFILES classpath)
           
           # Parse the classpath to find all JAR files
-          echo "$CLASSPATH" | tr ':' '\n' | grep '\.jar$' > /tmp/required-jars.txt || true
+          echo "$CLASSPATH" | tr ':' '\n' | grep '\.jar$' > /tmp/required-jars.txt
           
-          # Also get gitlibs if any
-          if [[ -d ~/.gitlibs ]]; then
-            find ~/.gitlibs -type f -name "*.jar" >> /tmp/required-jars.txt || true
-          fi
+          # Also capture dependency tree for reference
+          lein $LEIN_PROFILES deps :tree > /tmp/deps-tree.txt
           
           echo "Found $(wc -l < /tmp/required-jars.txt) required JAR files"
       
@@ -135,25 +121,22 @@ jobs:
           while IFS= read -r jar_path; do
             if [[ -f "$jar_path" ]]; then
               # Get the relative path from ~/.m2/repository
-              if [[ "$jar_path" == *"/.m2/repository/"* ]]; then
-                rel_path="${jar_path#*/.m2/repository/}"
-                target_dir="/tmp/minimal-m2/repository/$(dirname "$rel_path")"
-                mkdir -p "$target_dir"
-                cp "$jar_path" "$target_dir/"
-                
-                # Also copy the POM file if it exists
-                pom_path="${jar_path%.jar}.pom"
-                if [[ -f "$pom_path" ]]; then
-                  cp "$pom_path" "$target_dir/"
-                fi
+              rel_path="${jar_path#$HOME/.m2/repository/}"
+              target_dir="/tmp/minimal-m2/repository/$(dirname "$rel_path")"
+              mkdir -p "$target_dir"
+              cp "$jar_path" "$target_dir/"
+              
+              # Also copy the POM file if it exists
+              pom_path="${jar_path%.jar}.pom"
+              if [[ -f "$pom_path" ]]; then
+                cp "$pom_path" "$target_dir/"
               fi
             fi
           done < /tmp/required-jars.txt
           
-          # Also include gitlibs if present
-          if [[ -d ~/.gitlibs ]]; then
-            mkdir -p /tmp/minimal-m2/gitlibs
-            cp -r ~/.gitlibs/* /tmp/minimal-m2/gitlibs/ || true
+          # Also include Leiningen's own installation
+          if [[ -d "$HOME/.lein" ]]; then
+            cp -r "$HOME/.lein" /tmp/minimal-m2/
           fi
           
           echo "Minimal Maven cache created at /tmp/minimal-m2"
@@ -179,21 +162,14 @@ jobs:
           path: /tmp/minimal-m2/
           retention-days: 1
       
-      - name: Upload Clojure installation
-        uses: actions/upload-artifact@v4
-        with:
-          name: clojure-install
-          path: /tmp/clojure-install/
-          retention-days: 1
-      
-      - name: Upload dependency and Clojure checksums
+      - name: Upload dependency checksums
         uses: actions/upload-artifact@v4
         with:
           name: deps-checksums
           path: |
             /tmp/deps-checksums.txt
             /tmp/required-jars.txt
-            /tmp/clojure-checksums.txt
+            /tmp/deps-tree.txt
           retention-days: 1
 
   # Job 2: Build artifacts offline with verified dependencies
@@ -233,62 +209,34 @@ jobs:
           
           echo "All dependency checksums verified successfully"
       
-      - name: Download Clojure installation
-        uses: actions/download-artifact@v4
-        with:
-          name: clojure-install
-          path: /tmp/clojure-install/
-      
-      - name: Verify Clojure installation checksums
-        run: |
-          cd /tmp/clojure-install
-          
-          # Verify all Clojure files match their expected checksums
-          if ! sha256sum -c /tmp/clojure-checksums.txt; then
-            echo "ERROR: Clojure installation checksum verification failed!"
-            echo "The downloaded Clojure installation does not match the expected checksums."
-            exit 1
-          fi
-          
-          echo "All Clojure installation checksums verified successfully"
-      
-      - name: Restore Maven cache and gitlibs
+      - name: Restore Maven cache and Leiningen
         run: |
           # Restore the minimal Maven cache
           mkdir -p ~/.m2
-          cp -r /tmp/minimal-m2/repository ~/.m2/ || true
+          cp -r /tmp/minimal-m2/repository ~/.m2/
           
-          # Restore gitlibs if present
-          if [[ -d /tmp/minimal-m2/gitlibs ]]; then
-            mkdir -p ~/.gitlibs
-            cp -r /tmp/minimal-m2/gitlibs/* ~/.gitlibs/ || true
+          # Restore Leiningen installation if present
+          if [[ -d /tmp/minimal-m2/.lein ]]; then
+            cp -r /tmp/minimal-m2/.lein ~/.lein
           fi
+          
+          # Restore lein executable
+          mkdir -p ~/.local/bin
+          if [[ -f ~/.lein/bin/lein ]]; then
+            cp ~/.lein/bin/lein ~/.local/bin/
+          else
+            # Re-download if not in cache
+            curl -sL https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein -o ~/.local/bin/lein
+            echo "$LEIN_INSTALLER_SHA256  ~/.local/bin/lein" | sha256sum -c -
+          fi
+          chmod +x ~/.local/bin/lein
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
       
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: '${{ inputs.java-version }}'
           distribution: 'temurin'
-      
-      - name: Restore Clojure CLI
-        run: |
-          # Restore Clojure CLI from verified installation
-          sudo mkdir -p /usr/local/lib
-          sudo mkdir -p /usr/local/bin
-          
-          if [[ -d /tmp/clojure-install/clojure ]]; then
-            sudo cp -r /tmp/clojure-install/clojure /usr/local/lib/
-          fi
-          if [[ -f /tmp/clojure-install/clojure ]]; then
-            sudo cp /tmp/clojure-install/clojure /usr/local/bin/
-            sudo chmod +x /usr/local/bin/clojure
-          fi
-          if [[ -f /tmp/clojure-install/clj ]]; then
-            sudo cp /tmp/clojure-install/clj /usr/local/bin/
-            sudo chmod +x /usr/local/bin/clj
-          fi
-          
-          clojure --version
       
       - name: Extract version from tag
         id: get_version
@@ -296,39 +244,44 @@ jobs:
           echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
           echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
       
+      - name: Verify version matches tag
+        run: |
+          PROJECT_VERSION=$(lein $LEIN_PROFILES pprint :version | tr -d '"')
+          if [ "$PROJECT_VERSION" != "${{ steps.get_version.outputs.VERSION }}" ]; then
+            echo "ERROR: project.clj version ($PROJECT_VERSION) doesn't match tag (${{ steps.get_version.outputs.VERSION }})"
+            exit 1
+          fi
+      
       - name: Build JAR and POM offline
         env:
-          # Attempt to prevent network access
-          http_proxy: "http://localhost:9999"
-          https_proxy: "http://localhost:9999"
+          LEIN_OFFLINE: "true"
         run: |
-          # Build the JAR using only cached dependencies
-          # Note: tools.build doesn't have a strict offline mode like Lein,
-          # but we can try to ensure no network access via proxy settings
-          clojure -T:build jar || {
-            echo "Build failed. This might indicate missing dependencies or network access attempts."
-            exit 1
-          }
+          # Build the JAR offline using only cached dependencies
+          lein $LEIN_PROFILES jar
+          lein $LEIN_PROFILES pom
           
-          echo "Build completed"
+          echo "Build completed offline"
       
       - name: Find built artifacts
         id: artifacts
         run: |
-          JAR_FILE=$(find target -name "*.jar" | head -n 1)
-          POM_FILE=$(find target -name "pom.xml" | head -n 1)
+          JAR_FILE=$(find target -name "*.jar" -not -name "*-standalone.jar" | head -n 1)
+          POM_FILE="pom.xml"
           
           if [[ ! -f "$JAR_FILE" ]]; then
             echo "ERROR: JAR file not found in target directory"
             exit 1
           fi
           
-          echo "jar-file=$JAR_FILE" >> $GITHUB_OUTPUT
-          echo "pom-file=${POM_FILE:-pom.xml}" >> $GITHUB_OUTPUT
-          echo "Found JAR: $JAR_FILE"
-          if [[ -f "$POM_FILE" ]]; then
-            echo "Found POM: $POM_FILE"
+          if [[ ! -f "$POM_FILE" ]]; then
+            echo "ERROR: pom.xml not found"
+            exit 1
           fi
+          
+          echo "jar-file=$JAR_FILE" >> $GITHUB_OUTPUT
+          echo "pom-file=$POM_FILE" >> $GITHUB_OUTPUT
+          echo "Found JAR: $JAR_FILE"
+          echo "Found POM: $POM_FILE"
       
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -426,13 +379,13 @@ jobs:
               fi
             fi
             
-            # If not in source, check dependencies
+            # If not in source, check dependencies for .class files or resources
             if ! $found_source; then
               found_in_dep=false
               
               # Search in dependency JARs
               while IFS= read -r dep_jar; do
-                if [[ -f "$dep_jar" ]] && unzip -l "$dep_jar" 2>/dev/null | grep -q " $rel_path$"; then
+                if unzip -l "$dep_jar" 2>/dev/null | grep -q " $rel_path$"; then
                   # Extract and compare
                   temp_extract="/tmp/dep-extract-$$"
                   mkdir -p "$temp_extract"
@@ -447,6 +400,7 @@ jobs:
                       rm -rf "$temp_extract"
                       break
                     else
+                      # Checksum mismatch in dependency
                       if [[ "$rel_path" == *.class ]]; then
                         SUSPICIOUS_CLASS_FILES+=("$rel_path (checksum mismatch with $(basename "$dep_jar"))")
                       fi
@@ -483,7 +437,7 @@ jobs:
             echo "" >> "$PROVENANCE_REPORT"
             echo "To reproduce this error locally:" >> "$PROVENANCE_REPORT"
             echo "1. Clone the repository and checkout: $GITHUB_SHA" >> "$PROVENANCE_REPORT"
-            echo "2. Build: clojure -T:build jar" >> "$PROVENANCE_REPORT"
+            echo "2. Build: lein $LEIN_PROFILES jar" >> "$PROVENANCE_REPORT"
             echo "3. Extract and inspect the JAR contents" >> "$PROVENANCE_REPORT"
             
             cat "$PROVENANCE_REPORT"
@@ -547,7 +501,7 @@ jobs:
             /tmp/provenance-report.txt
             /tmp/deps-checksums.txt
             /tmp/required-jars.txt
-            /tmp/clojure-checksums.txt
+            /tmp/deps-tree.txt
           body: |
             ## Release ${{ steps.get_version.outputs.TAG }}
             
@@ -568,12 +522,12 @@ jobs:
             
             See the attached `provenance-report.txt` for detailed analysis of all files in the JAR.
             
-            ### Dependency and Tool Checksums
+            ### Dependency Checksums
             
-            The following files contain complete dependency and tooling information:
-            - `deps-checksums.txt` - SHA256 checksums of all dependencies
+            The following files contain complete dependency information:
+            - `deps-checksums.txt` - SHA256 checksums of all dependencies and Leiningen installation
             - `required-jars.txt` - List of all JAR files used in the build
-            - `clojure-checksums.txt` - SHA256 checksums of Clojure CLI installation
+            - `deps-tree.txt` - Complete dependency tree
             
             ### Note
             
