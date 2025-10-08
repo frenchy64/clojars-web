@@ -3,6 +3,12 @@
 Newest items at the top. Note that updates before 2022-August were copied from
 [[https://groups.google.com/g/clojars-maintainers][announcements on the Clojars Maintainer's mailing list]] with little editing.
 
+** Unreleased
++ [[https://github.com/clojars/clojars-web/issues/149][Add incremental checksum generation for repository integrity]] ([[https://github.com/frenchy64][Ambrose Bonnaire-Sergeant]])
+  Implements periodic checksum backups for JAR and POM files to enable verification
+  of repository integrity over time. Checksums are stored in incremental files at
+  =.checksums/incremental-checksums-{N}.txt.gz= in the repository bucket.
+
 ** 2025-June
 *** [[https://github.com/clojars/clojars-web/releases/tag/2025-06-08.2169][2025-06-08.2169]]
 + [[https://github.com/clojars/clojars-web/commit/baade8967c7be8abd9a9b27499c511efd41f6164][Use correct alias when building uberjar]] ([[https://github.com/tobias][Toby Crawley]], [[https://github.com/frenchy64][Ambrose Bonnaire-Sergeant]])
