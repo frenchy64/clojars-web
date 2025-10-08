@@ -36,7 +36,7 @@
   [s3-bucket path]
   (try
     (when-let [stream (s3/get-object-stream s3-bucket path)]
-      (let [bytes (with-open [in stream]
+      (let [bytes (with-open [^java.io.InputStream in stream]
                     (let [baos (java.io.ByteArrayOutputStream.)]
                       (io/copy in baos)
                       (.toByteArray baos)))
@@ -148,7 +148,7 @@
         (println (format "Generating %d incremental checksum file(s)..." (count partitions)))
         (into []
               (mapcat
-               (fn [idx checksums-batch]
+               (fn [[idx checksums-batch]]
                  (let [file-num (+ file-number idx)
                        filename (format "incremental-checksums-%d.txt" file-num)
                        gz-filename (str filename ".gz")
