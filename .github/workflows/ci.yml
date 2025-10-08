@@ -24,14 +24,6 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-      
-      minio:
-        image: minio/minio:RELEASE.2023-04-20T17-56-55Z
-        env:
-          MINIO_ROOT_USER: fake-access-key
-          MINIO_ROOT_PASSWORD: fake-secret-key
-        ports:
-          - 9000:9000
     
     env:
       DB_PORT: 5432
@@ -60,19 +52,30 @@ jobs:
           restore-keys: |
             clojars-
       
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=fake-access-key \
+            -e MINIO_ROOT_PASSWORD=fake-secret-key \
+            minio/minio:RELEASE.2023-04-20T17-56-55Z \
+            server /data
+      
       - name: Prepare dependencies
         run: make prep-deps
       
       - name: Download ElasticMQ
-        run: curl https://s3-eu-west-1.amazonaws.com/softwaremill-public/elasticmq-server-1.6.12.jar -o elasticmq.jar
+        run: curl -L https://s3-eu-west-1.amazonaws.com/softwaremill-public/elasticmq-server-1.6.12.jar -o elasticmq.jar
       
       - name: Start ElasticMQ
         run: java -Dconfig.file=dev-resources/elasticmq.conf -jar elasticmq.jar &
       
       - name: Wait for services
         run: |
-          timeout 30 bash -c 'until nc -z localhost 5432; do sleep 1; done'
-          timeout 30 bash -c 'until nc -z localhost 9000; do sleep 1; done'
+          timeout 60 bash -c 'until nc -z localhost 5432; do sleep 1; done'
+          timeout 60 bash -c 'until nc -z localhost 9000; do sleep 1; done'
+          timeout 60 bash -c 'until nc -z localhost 9324; do sleep 1; done'
+          echo "All services are ready"
       
       - name: Migrate database
         run: make migrate-db
