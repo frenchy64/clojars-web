@@ -1,0 +1,29 @@
+;; Meta-checksums for incremental checksum files
+;; This file stores checksums of the incremental-checksums-*.txt.gz files
+;; from the Clojars repository to detect tampering.
+;;
+;; Format: EDN list of maps with the following keys:
+;;   :file      - Filename (e.g., "incremental-checksums-1.txt.gz")
+;;   :number    - Sequential number extracted from filename
+;;   :sha256    - SHA-256 checksum of the file
+;;   :md5       - MD5 checksum of the file
+;;   :size      - File size in bytes
+;;   :timestamp - ISO 8601 timestamp when this entry was added
+;;
+;; SECURITY NOTES:
+;; - This file is stored in git to provide an audit trail
+;; - Never force-push or rewrite history - this would destroy the audit trail
+;; - Any modification to historical entries indicates a security breach
+;; - New entries should only be added, never removed or modified
+;;
+;; Example entry:
+;; {:file "incremental-checksums-1.txt.gz"
+;;  :number 1
+;;  :sha256 "a1b2c3d4e5f6..."
+;;  :md5 "1a2b3c4d..."
+;;  :size 123456
+;;  :timestamp "2025-01-15T10:30:00Z"}
+
+[
+ ;; Entries will be added here as new incremental checksum files are discovered
+]
