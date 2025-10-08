@@ -9,7 +9,7 @@
     :workflow ".github/workflows/attestable-build-lein.yml"
     :ref "refs/heads/main"}
    {:repo "clojars/clojars-web"
-    :workflow ".github/workflows/attestable-build-tools.yml"
+    :workflow ".github/workflows/attestable-clojure-cli.yml"
     :ref "refs/heads/main"}
    {:repo "clojars/clojars-web"
     :workflow ".github/workflows/attestable-build-lein.yml"
@@ -76,7 +76,7 @@
     ;; Another trusted workflow
     (is (#'av/workflow-trusted?
          {:repo "clojars/clojars-web"
-          :workflow ".github/workflows/attestable-build-tools.yml"
+          :workflow ".github/workflows/attestable-clojure-cli.yml"
           :ref "refs/heads/main"}
          test-trusted-workflows)))
   
@@ -105,8 +105,8 @@
     ;; Tag doesn't match pattern
     (is (not (#'av/workflow-trusted?
               {:repo "clojars/clojars-web"
-               :workflow ".github/workflows/attestable-build-tools.yml"
-               :ref "refs/tags/v1.0.0"} ;; tools workflow doesn't have tag pattern
+               :workflow ".github/workflows/attestable-clojure-cli.yml"
+               :ref "refs/tags/v1.0.0"} ;; clojure-cli workflow doesn't have tag pattern
               test-trusted-workflows)))))
 
 (deftest verify-attestation-workflow-test
@@ -173,7 +173,7 @@
       (is (= 3 (count listed)))
       (is (every? string? listed))
       (is (some #(str/includes? % "attestable-build-lein") listed))
-      (is (some #(str/includes? % "attestable-build-tools") listed)))))
+      (is (some #(str/includes? % "attestable-clojure-cli") listed)))))
 
 (deftest integration-test
   (testing "Full workflow: attestation from trusted source accepted"

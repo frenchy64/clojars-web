@@ -20,7 +20,7 @@
     :workflow ".github/workflows/attestable-build-lein.yml"
     :ref "refs/heads/main"}
    {:repo "clojars/clojars-web"
-    :workflow ".github/workflows/attestable-build-tools.yml"
+    :workflow ".github/workflows/attestable-clojure-cli.yml"
     :ref "refs/heads/main"}])
 
 (defn- parse-workflow-ref

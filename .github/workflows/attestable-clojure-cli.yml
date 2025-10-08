@@ -1,7 +1,10 @@
-# Clojars Reusable Attestable Build Workflow for tools.build Projects
+# Clojars Reusable Attestable Build Workflow for Clojure CLI (tools.build) Projects
 #
 # This is a reusable workflow maintained by Clojars that provides secure, reproducible
 # builds with full provenance tracking. Clojars trusts and accepts attestations from this workflow.
+#
+# SUPPORTED CLOJURE CLI VERSIONS:
+# - 1.12.3.1577 (default)
 #
 # USAGE: Call this workflow from your repository's workflow:
 #
@@ -12,9 +15,41 @@
 #     tags: ['v*']
 # jobs:
 #   build:
-#     uses: clojars/clojars-web/.github/workflows/attestable-build-tools.yml@main
+#     uses: clojars/clojars-web/.github/workflows/attestable-clojure-cli.yml@main
 #     with:
-#       java-version: '${{ inputs.java-version }}'
+#       java-version: '21'
+#       clojure-version: '1.12.3.1577'
+# ```
+#
+# After the workflow completes, download the attested artifacts (JAR and POM):
+#
+# ```yaml
+# jobs:
+#   build:
+#     uses: clojars/clojars-web/.github/workflows/attestable-clojure-cli.yml@main
+#     # ... inputs ...
+#   
+#   deploy:
+#     needs: build
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Download attested artifacts
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: attested-jar
+#           path: artifacts/
+#       
+#       - name: Deploy to Clojars
+#         run: |
+#           # Use Maven deploy:deploy-file to upload attested artifacts
+#           mvn deploy:deploy-file \
+#             -Dfile=artifacts/*.jar \
+#             -DpomFile=artifacts/pom.xml \
+#             -DrepositoryId=clojars \
+#             -Durl=https://repo.clojars.org
+#         env:
+#           CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
+#           CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}
 # ```
 #
 # This workflow uses a multi-job pipeline to:
@@ -22,6 +57,7 @@
 # 2. Build artifacts offline with verified dependencies
 # 3. Analyze build provenance and verify all source files
 # 4. Generate attestation ONLY after verification passes
+# 5. Upload attested artifacts for deployment
 #
 # Note: This workflow does NOT deploy to Clojars automatically.
 # Deployment should only happen after full attestation is complete and verified.
@@ -38,7 +74,7 @@
 # - Consider creating minimal gitlibs cache similar to Maven cache
 # - Verify gitlibs checksums across all jobs
 
-name: Attestable tools.build Build (Clojars Trusted)
+name: Attestable Clojure CLI Build (Clojars Trusted)
 
 on:
   workflow_call:
@@ -49,7 +85,7 @@ on:
         default: '21'
         type: string
       clojure-version:
-        description: 'Clojure CLI version to use'
+        description: 'Clojure CLI version to use (supported: 1.12.3.1577)'
         required: false
         default: '1.12.3.1577'
         type: string
@@ -59,8 +95,8 @@ env:
   CLOJURE_VERSION: ${{ inputs.clojure-version }}
   # Immutable URL for the Clojure CLI installer (pinned to version tag)
   CLOJURE_INSTALLER_URL: "https://github.com/clojure/brew-install/releases/download/${{ inputs.clojure-version }}/linux-install.sh"
-  # SHA256 of the linux-install.sh script from the pinned version
-  CLOJURE_INSTALLER_SHA256: "a55106244ca93ef7b61309e9dca4b248257685870824a8abe2efa706ede8241f"
+  # SHA256 checksums for supported Clojure CLI installer versions
+  CLOJURE_INSTALLER_1_12_3_1577_SHA256: "a55106244ca93ef7b61309e9dca4b248257685870824a8abe2efa706ede8241f"
 
 jobs:
   # Job 1: Download and cache dependencies in isolation
@@ -84,10 +120,22 @@ jobs:
           # Download Clojure CLI installer from immutable version tag
           curl -sL "$CLOJURE_INSTALLER_URL" -o install-clojure.sh
           
+          # Select the correct checksum based on the Clojure CLI version
+          case "$CLOJURE_VERSION" in
+            1.12.3.1577)
+              EXPECTED_SHA256="$CLOJURE_INSTALLER_1_12_3_1577_SHA256"
+              ;;
+            *)
+              echo "ERROR: Unsupported Clojure CLI version: $CLOJURE_VERSION"
+              echo "Supported versions: 1.12.3.1577"
+              exit 1
+              ;;
+          esac
+          
           # Verify the SHA256 checksum of the installer
-          echo "$CLOJURE_INSTALLER_SHA256  install-clojure.sh" | sha256sum -c - || {
+          echo "$EXPECTED_SHA256  install-clojure.sh" | sha256sum -c - || {
             echo "ERROR: Clojure CLI installer checksum verification failed!"
-            echo "Expected: $CLOJURE_INSTALLER_SHA256"
+            echo "Expected: $EXPECTED_SHA256"
             echo "Got: $(sha256sum install-clojure.sh | cut -d' ' -f1)"
             exit 1
           }
@@ -555,46 +603,28 @@ jobs:
           }
           EOF
       
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Upload attested JAR and POM for deployment
+        uses: actions/upload-artifact@v4
         with:
-          files: |
+          name: attested-jar
+          path: |
             /tmp/artifacts/*.jar
             /tmp/artifacts/pom.xml
-            /tmp/attestation-metadata.json
-            /tmp/provenance-report.txt
+          retention-days: 90
+      
+      - name: Upload attestation metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: attestation-metadata
+          path: /tmp/attestation-metadata.json
+          retention-days: 90
+      
+      - name: Upload dependency checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-checksums
+          path: |
             /tmp/deps-checksums.txt
             /tmp/required-jars.txt
             /tmp/clojure-checksums.txt
-          body: |
-            ## Release ${{ steps.get_version.outputs.TAG }}
-            
-            Built with full provenance tracking and attestation.
-            
-            **Attestation:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            **Commit:** ${{ github.sha }}
-            **Dependencies Hash:** ${{ needs.prepare-dependencies.outputs.deps-hash }}
-            
-            ### Verification
-            
-            Verify the attestation using:
-            ```bash
-            gh attestation verify <jar-file> --repo ${{ github.repository }}
-            ```
-            
-            ### Provenance
-            
-            See the attached `provenance-report.txt` for detailed analysis of all files in the JAR.
-            
-            ### Dependency and Tool Checksums
-            
-            The following files contain complete dependency and tooling information:
-            - `deps-checksums.txt` - SHA256 checksums of all dependencies
-            - `required-jars.txt` - List of all JAR files used in the build
-            - `clojure-checksums.txt` - SHA256 checksums of Clojure CLI installation
-            
-            ### Note
-            
-            This build was created with isolated, verified dependencies and full provenance tracking.
-            Deploy to Clojars only after reviewing the attestation and provenance report.
+          retention-days: 90

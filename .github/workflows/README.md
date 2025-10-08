@@ -39,11 +39,11 @@ jobs:
 3. Analyzes every file in the JAR for provenance
 4. Fails if any `.clj` file can't be traced to source or dependencies
 5. Generates GitHub attestation ONLY after verification passes
-6. Uploads all checksums and provenance reports to GitHub Release
+6. Uploads JAR, POM, checksums and provenance as artifacts for deployment
 
-### 2. tools.build Build (`attestable-build-tools.yml`)
+### 2. Clojure CLI Build (`attestable-clojure-cli.yml`)
 
-Secure 3-job pipeline for tools.build projects with full provenance tracking.
+Secure 3-job pipeline for Clojure CLI (tools.build) projects with full provenance tracking.
 
 **Usage:**
 ```yaml
@@ -55,10 +55,31 @@ on:
 
 jobs:
   build:
-    uses: clojars/clojars-web/.github/workflows/attestable-build-tools.yml@main
+    uses: clojars/clojars-web/.github/workflows/attestable-clojure-cli.yml@main
     with:
       java-version: '21'  # Optional, defaults to '21'
       clojure-version: '1.12.3.1577'  # Optional, defaults to '1.12.3.1577'
+  
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download attested artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: attested-jar
+          path: artifacts/
+      
+      - name: Deploy to Clojars
+        run: |
+          mvn deploy:deploy-file \
+            -Dfile=artifacts/*.jar \
+            -DpomFile=artifacts/pom.xml \
+            -DrepositoryId=clojars \
+            -Durl=https://repo.clojars.org
+        env:
+          CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
+          CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}
 ```
 
 **What it does:**
@@ -67,7 +88,41 @@ jobs:
 3. Analyzes complete provenance of all files
 4. Fails if any source files can't be verified
 5. Generates attestation after verification
-6. Uploads checksums and provenance to GitHub Release
+6. Uploads JAR, POM, checksums and provenance as artifacts for deployment
+
+## Deploying Attested Artifacts
+
+After the build workflow completes, download and deploy the attested artifacts:
+
+```yaml
+jobs:
+  build:
+    uses: clojars/clojars-web/.github/workflows/attestable-build-lein.yml@main
+    # ... inputs ...
+  
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download attested artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: attested-jar
+          path: artifacts/
+      
+      - name: Deploy to Clojars with Maven
+        run: |
+          mvn deploy:deploy-file \
+            -Dfile=artifacts/*.jar \
+            -DpomFile=artifacts/pom.xml \
+            -DrepositoryId=clojars \
+            -Durl=https://repo.clojars.org
+        env:
+          CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
+          CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}
+```
+
+The attested artifacts are also available as workflow artifacts you can download from the Actions tab.
 
 ## Security Model
 
@@ -133,7 +188,7 @@ All workflows follow a secure 3-job pipeline:
 - **Fails build if any source can't be verified**
 - Generates comprehensive provenance report
 - **Attests artifacts ONLY after verification passes**
-- Creates GitHub Release with all artifacts and reports
+- Uploads JAR, POM, and all reports as workflow artifacts
 
 ## For Project Maintainers
 
@@ -154,8 +209,8 @@ Your project needs:
    # For Leiningen projects
    uses: clojars/clojars-web/.github/workflows/attestable-build-lein.yml@main
    
-   # For tools.build projects
-   uses: clojars/clojars-web/.github/workflows/attestable-build-tools.yml@main
+   # For Clojure CLI (tools.build) projects
+   uses: clojars/clojars-web/.github/workflows/attestable-clojure-cli.yml@main
    ```
 
 3. **Tag and push:**
@@ -167,11 +222,12 @@ Your project needs:
 4. **Check the build:**
    - GitHub Actions will run the workflow
    - Build will fail if any source can't be verified
-   - Success creates a GitHub Release with attestation
+   - Success creates attested artifacts available for download
 
 5. **Deploy to Clojars:**
+   - Download the attested JAR and POM from workflow artifacts
+   - Deploy using Maven `deploy:deploy-file` command (see example above)
    - Clojars will verify the attestation came from a trusted workflow
-   - Manual deployment step (automatic deployment after attestation verification coming soon)
 
 ### Troubleshooting
 

@@ -3,6 +3,9 @@
 # This is a reusable workflow maintained by Clojars that provides secure, reproducible
 # builds with full provenance tracking. Clojars trusts and accepts attestations from this workflow.
 #
+# SUPPORTED LEININGEN VERSIONS:
+# - 2.12.0 (default)
+#
 # USAGE: Call this workflow from your repository's workflow:
 #
 # ```yaml
@@ -14,7 +17,39 @@
 #   build:
 #     uses: clojars/clojars-web/.github/workflows/attestable-build-lein.yml@main
 #     with:
-#       java-version: '${{ inputs.java-version }}'
+#       java-version: '21'
+#       lein-version: '2.12.0'
+# ```
+#
+# After the workflow completes, download the attested artifacts (JAR and POM):
+#
+# ```yaml
+# jobs:
+#   build:
+#     uses: clojars/clojars-web/.github/workflows/attestable-build-lein.yml@main
+#     # ... inputs ...
+#   
+#   deploy:
+#     needs: build
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Download attested artifacts
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: attested-jar
+#           path: artifacts/
+#       
+#       - name: Deploy to Clojars
+#         run: |
+#           # Use Maven deploy:deploy-file to upload attested artifacts
+#           mvn deploy:deploy-file \
+#             -Dfile=artifacts/*.jar \
+#             -DpomFile=artifacts/*.pom \
+#             -DrepositoryId=clojars \
+#             -Durl=https://repo.clojars.org
+#         env:
+#           CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
+#           CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}
 # ```
 #
 # This workflow uses a multi-job pipeline to:
@@ -22,6 +57,7 @@
 # 2. Build artifacts offline with verified dependencies
 # 3. Analyze build provenance and verify all source files
 # 4. Generate attestation ONLY after verification passes
+# 5. Upload attested artifacts for deployment
 #
 # Note: This workflow does NOT deploy to Clojars automatically.
 # Deployment should only happen after full attestation is complete and verified.
@@ -37,7 +73,7 @@ on:
         default: '21'
         type: string
       lein-version:
-        description: 'Leiningen version to use'
+        description: 'Leiningen version to use (supported: 2.12.0)'
         required: false
         default: '2.12.0'
         type: string
@@ -47,8 +83,8 @@ env:
   LEIN_VERSION: ${{ inputs.lein-version }}
   # Immutable URL for the lein installer (pinned to version tag, not 'stable' branch)
   LEIN_INSTALLER_URL: "https://raw.githubusercontent.com/technomancy/leiningen/${{ inputs.lein-version }}/bin/lein"
-  # SHA256 of the lein installer script from the pinned version
-  LEIN_INSTALLER_SHA256: "f8e1266c0c78c08bd4af6e111889ecc316c9dd56d1e8645bbee6c1703d351bc3"
+  # SHA256 checksums for supported Leiningen installer versions
+  LEIN_INSTALLER_2_12_0_SHA256: "f8e1266c0c78c08bd4af6e111889ecc316c9dd56d1e8645bbee6c1703d351bc3"
   # Profile configuration to exclude user, test, and dev profiles for reproducibility
   LEIN_PROFILES: "with-profile -user,-test,-dev"
 
@@ -74,10 +110,22 @@ jobs:
           # Download the official Leiningen installer script from immutable version tag
           curl -sL "$LEIN_INSTALLER_URL" -o lein
           
+          # Select the correct checksum based on the Leiningen version
+          case "$LEIN_VERSION" in
+            2.12.0)
+              EXPECTED_SHA256="$LEIN_INSTALLER_2_12_0_SHA256"
+              ;;
+            *)
+              echo "ERROR: Unsupported Leiningen version: $LEIN_VERSION"
+              echo "Supported versions: 2.12.0"
+              exit 1
+              ;;
+          esac
+          
           # Verify the SHA256 checksum of the installer
-          echo "$LEIN_INSTALLER_SHA256  lein" | sha256sum -c - || {
+          echo "$EXPECTED_SHA256  lein" | sha256sum -c - || {
             echo "ERROR: Leiningen installer checksum verification failed!"
-            echo "Expected: $LEIN_INSTALLER_SHA256"
+            echo "Expected: $EXPECTED_SHA256"
             echo "Got: $(sha256sum lein | cut -d' ' -f1)"
             exit 1
           }
@@ -490,46 +538,28 @@ jobs:
           }
           EOF
       
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Upload attested JAR and POM for deployment
+        uses: actions/upload-artifact@v4
         with:
-          files: |
+          name: attested-jar
+          path: |
             /tmp/artifacts/*.jar
             /tmp/artifacts/pom.xml
-            /tmp/attestation-metadata.json
-            /tmp/provenance-report.txt
+          retention-days: 90
+      
+      - name: Upload attestation metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: attestation-metadata
+          path: /tmp/attestation-metadata.json
+          retention-days: 90
+      
+      - name: Upload dependency checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-checksums
+          path: |
             /tmp/deps-checksums.txt
             /tmp/required-jars.txt
             /tmp/deps-tree.txt
-          body: |
-            ## Release ${{ steps.get_version.outputs.TAG }}
-            
-            Built with full provenance tracking and attestation.
-            
-            **Attestation:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            **Commit:** ${{ github.sha }}
-            **Dependencies Hash:** ${{ needs.prepare-dependencies.outputs.deps-hash }}
-            
-            ### Verification
-            
-            Verify the attestation using:
-            ```bash
-            gh attestation verify <jar-file> --repo ${{ github.repository }}
-            ```
-            
-            ### Provenance
-            
-            See the attached `provenance-report.txt` for detailed analysis of all files in the JAR.
-            
-            ### Dependency Checksums
-            
-            The following files contain complete dependency information:
-            - `deps-checksums.txt` - SHA256 checksums of all dependencies and Leiningen installation
-            - `required-jars.txt` - List of all JAR files used in the build
-            - `deps-tree.txt` - Complete dependency tree
-            
-            ### Note
-            
-            This build was created with isolated, verified dependencies and full provenance tracking.
-            Deploy to Clojars only after reviewing the attestation and provenance report.
+          retention-days: 90
