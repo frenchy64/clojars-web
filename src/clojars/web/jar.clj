@@ -302,8 +302,9 @@
     {:readonly "readonly" :rows 4}
     (badge-markdown jar true)]))
 
-(defn- verification-badge [verification]
+(defn- verification-badge
   "Display a verification status badge."
+  [verification]
   (when verification
     (let [status (:verification_status verification)]
       (case status
@@ -328,8 +329,9 @@
          {:title "This version has not been verified"}
          "? Unverified"]))))
 
-(defn- verification-info [db jar]
+(defn- verification-info
   "Display verification information for a jar version."
+  [db jar]
   (when-let [verification (verification-db/find-jar-verification
                            db
                            (:group_name jar)
@@ -353,8 +355,9 @@
      (when-let [notes (:verification_notes verification)]
        [:p.verification-notes [:small notes]]))))
 
-(defn- verification-metrics-display [db jar]
+(defn- verification-metrics-display
   "Display verification metrics for all versions of a jar."
+  [db jar]
   (let [metrics (verification-db/verification-metrics
                  db
                  (:group_name jar)

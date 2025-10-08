@@ -12,7 +12,7 @@
   "Helper to add a test jar to the database."
   [db]
   (db/add-user db "test@example.com" "testuser" "password")
-  (db/add-member db "org.clojars.testuser" "testuser" "testuser")
+  (db/add-member db "org.clojars.testuser" db/SCOPE-ALL "testuser" "testuser")
   (db/add-jar db "testuser"
               {:group "org.clojars.testuser"
                :name "test-jar"
