@@ -89,6 +89,10 @@ GET /api/artifacts/:group-id/:artifact-id/verification/all
 
 Returns verification records for all versions of a JAR.
 
+### API Examples
+
+For detailed examples of using the API, including Clojure code and integration patterns, see [VERIFICATION_API_EXAMPLES.md](VERIFICATION_API_EXAMPLES.md).
+
 ## Verification Statuses
 
 - **verified**: The JAR has been successfully verified against its source repository

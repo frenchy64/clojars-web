@@ -13,6 +13,16 @@ also a [FAQ](https://github.com/clojars/clojars-web/wiki/About).
 
 See [the CHANGELOG](CHANGELOG.org) for changes.
 
+Build Verification System
+--------------------------
+
+Clojars includes a build verification and attestation system to help establish trust and provenance for JAR artifacts. See [VERIFICATION.md](VERIFICATION.md) for details on:
+
+- How the verification system works
+- API endpoints for programmatic access
+- GitHub Actions workflow templates for attestable builds
+- Best practices for maintainers
+
 Contributing
 ------------
 
