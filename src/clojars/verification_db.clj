@@ -3,9 +3,19 @@
   (:require
    [clojars.db :as db]
    [honey.sql :as hsql]
-   [next.jdbc.sql :as sql]))
+   [next.jdbc.sql :as sql]
+   [next.jdbc.result-set :as jdbc.result-set]))
 
 (set! *warn-on-reflection* true)
+
+;; Private helper function for queries
+(defn- q
+  ([db query-data]
+   (q db query-data nil))
+  ([db query-data opts]
+   (sql/query db (hsql/format query-data {:quoted true})
+              (assoc opts
+                     :builder-fn jdbc.result-set/as-unqualified-lower-maps))))
 
 ;; Verification status values
 (def VERIFICATION-STATUS-VERIFIED "verified")
@@ -55,50 +65,50 @@
   "Find verification record for a specific jar version."
   [db group-name jar-name version]
   (first
-   (db/q db
-         {:select :*
-          :from :jar_verifications
-          :where [:and
-                  [:= :group_name group-name]
-                  [:= :jar_name jar-name]
-                  [:= :version version]]
-          :limit 1})))
+   (q db
+      {:select :*
+       :from :jar_verifications
+       :where [:and
+               [:= :group_name group-name]
+               [:= :jar_name jar-name]
+               [:= :version version]]
+       :limit 1})))
 
 (defn find-jar-verifications
   "Find all verification records for a jar (all versions)."
   [db group-name jar-name]
-  (db/q db
-        {:select :*
-         :from :jar_verifications
-         :where [:and
-                 [:= :group_name group-name]
-                 [:= :jar_name jar-name]]
-         :order-by [[:verified_at :desc]]}))
+  (q db
+     {:select :*
+      :from :jar_verifications
+      :where [:and
+              [:= :group_name group-name]
+              [:= :jar_name jar-name]]
+      :order-by [[:verified_at :desc]]}))
 
 (defn count-verified-versions
   "Count how many verified versions exist for a jar."
   [db group-name jar-name]
-  (-> (db/q db
-            {:select [[[:count :*] :count]]
-             :from :jar_verifications
-             :where [:and
-                     [:= :group_name group-name]
-                     [:= :jar_name jar-name]
-                     [:= :verification_status VERIFICATION-STATUS-VERIFIED]]
-             :limit 1})
+  (-> (q db
+         {:select [[[:count :*] :count]]
+          :from :jar_verifications
+          :where [:and
+                  [:= :group_name group-name]
+                  [:= :jar_name jar-name]
+                  [:= :verification_status VERIFICATION-STATUS-VERIFIED]]
+          :limit 1})
       first
       :count))
 
 (defn count-total-versions-with-verification
   "Count total number of versions with verification records for a jar."
   [db group-name jar-name]
-  (-> (db/q db
-            {:select [[[:count :*] :count]]
-             :from :jar_verifications
-             :where [:and
-                     [:= :group_name group-name]
-                     [:= :jar_name jar-name]]
-             :limit 1})
+  (-> (q db
+         {:select [[[:count :*] :count]]
+          :from :jar_verifications
+          :where [:and
+                  [:= :group_name group-name]
+                  [:= :jar_name jar-name]]
+          :limit 1})
       first
       :count))
 
@@ -118,27 +128,27 @@
 (defn find-recent-verified-jars
   "Find recently verified jars."
   [db limit]
-  (db/q db
-        {:select [:group_name :jar_name :version :verification_status
-                  :verification_method :verified_at]
-         :from :jar_verifications
-         :where [:= :verification_status VERIFICATION-STATUS-VERIFIED]
-         :order-by [[:verified_at :desc]]
-         :limit limit}))
+  (q db
+     {:select [:group_name :jar_name :version :verification_status
+               :verification_method :verified_at]
+      :from :jar_verifications
+      :where [:= :verification_status VERIFICATION-STATUS-VERIFIED]
+      :order-by [[:verified_at :desc]]
+      :limit limit}))
 
 (defn find-unverified-jars
   "Find jars that have no verification record.
    Returns group_name, jar_name, and version for jars missing verification."
   [db limit offset]
-  (db/q db
-        {:select [:j/group_name :j/jar_name :j/version]
-         :from [[:jars :j]]
-         :left-join [[:jar_verifications :v]
-                     [:and
-                      [:= :j/group_name :v/group_name]
-                      [:= :j/jar_name :v/jar_name]
-                      [:= :j/version :v/version]]]
-         :where [:is :v/id nil]
-         :order-by [[:j/created :desc]]
-         :limit limit
-         :offset offset}))
+  (q db
+     {:select [:j/group_name :j/jar_name :j/version]
+      :from [[:jars :j]]
+      :left-join [[:jar_verifications :v]
+                  [:and
+                   [:= :j/group_name :v/group_name]
+                   [:= :j/jar_name :v/jar_name]
+                   [:= :j/version :v/version]]]
+      :where [:is :v/id nil]
+      :order-by [[:j/created :desc]]
+      :limit limit
+      :offset offset}))

@@ -157,9 +157,6 @@ jobs:
   build-artifacts:
     runs-on: ubuntu-latest
     needs: prepare-dependencies
-    permissions:
-      id-token: write
-      attestations: write
     outputs:
       jar-file: ${{ steps.artifacts.outputs.jar-file }}
       pom-file: ${{ steps.artifacts.outputs.pom-file }}
@@ -267,13 +264,6 @@ jobs:
           echo "Found JAR: $JAR_FILE"
           echo "Found POM: $POM_FILE"
       
-      - name: Attest build artifacts
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: |
-            ${{ steps.artifacts.outputs.jar-file }}
-            ${{ steps.artifacts.outputs.pom-file }}
-      
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -289,6 +279,8 @@ jobs:
     needs: [prepare-dependencies, build-artifacts]
     permissions:
       contents: write  # For creating release
+      id-token: write  # For attestation
+      attestations: write  # For artifact attestation
     
     steps:
       - name: Checkout code
@@ -453,6 +445,11 @@ jobs:
           name: provenance-report
           path: /tmp/provenance-report.txt
           retention-days: 90
+      
+      - name: Attest build artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: /tmp/artifacts/*.jar
       
       - name: Extract version from tag
         id: get_version
