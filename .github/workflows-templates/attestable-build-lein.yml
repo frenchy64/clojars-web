@@ -26,7 +26,9 @@ on:
 env:
   # Pinned Leiningen version for reproducibility
   LEIN_VERSION: "2.12.0"
-  # SHA256 of the lein installer script from https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein
+  # Immutable URL for the lein installer (pinned to version tag, not 'stable' branch)
+  LEIN_INSTALLER_URL: "https://raw.githubusercontent.com/technomancy/leiningen/2.12.0/bin/lein"
+  # SHA256 of the lein installer script from the pinned version
   LEIN_INSTALLER_SHA256: "f8e1266c0c78c08bd4af6e111889ecc316c9dd56d1e8645bbee6c1703d351bc3"
   # Profile configuration to exclude user, test, and dev profiles for reproducibility
   LEIN_PROFILES: "with-profile -user,-test,-dev"
@@ -50,8 +52,8 @@ jobs:
       
       - name: Download and verify Leiningen installer
         run: |
-          # Download the official Leiningen installer script
-          curl -sL https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein -o lein
+          # Download the official Leiningen installer script from immutable version tag
+          curl -sL "$LEIN_INSTALLER_URL" -o lein
           
           # Verify the SHA256 checksum of the installer
           echo "$LEIN_INSTALLER_SHA256  lein" | sha256sum -c - || {
@@ -481,6 +483,9 @@ jobs:
             /tmp/artifacts/pom.xml
             /tmp/attestation-metadata.json
             /tmp/provenance-report.txt
+            /tmp/deps-checksums.txt
+            /tmp/required-jars.txt
+            /tmp/deps-tree.txt
           body: |
             ## Release ${{ steps.get_version.outputs.TAG }}
             
@@ -500,6 +505,13 @@ jobs:
             ### Provenance
             
             See the attached `provenance-report.txt` for detailed analysis of all files in the JAR.
+            
+            ### Dependency Checksums
+            
+            The following files contain complete dependency information:
+            - `deps-checksums.txt` - SHA256 checksums of all dependencies and Leiningen installation
+            - `required-jars.txt` - List of all JAR files used in the build
+            - `deps-tree.txt` - Complete dependency tree
             
             ### Note
             
