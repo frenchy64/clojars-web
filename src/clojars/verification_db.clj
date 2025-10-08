@@ -163,14 +163,14 @@
    Returns group_name, jar_name, and version for jars missing verification."
   [db limit offset]
   (q db
-     {:select [:j/group_name :j/jar_name :j/version]
+     {:select [:j.group_name :j.jar_name :j.version]
       :from [[:jars :j]]
       :left-join [[:jar_verifications :v]
                   [:and
-                   [:= :j/group_name :v/group_name]
-                   [:= :j/jar_name :v/jar_name]
-                   [:= :j/version :v/version]]]
-      :where [:is :v/id nil]
-      :order-by [[:j/created :desc]]
+                   [:= :j.group_name :v.group_name]
+                   [:= :j.jar_name :v.jar_name]
+                   [:= :j.version :v.version]]]
+      :where [:is :v.id :null]
+      :order-by [[:j.created :desc]]
       :limit limit
       :offset offset}))
