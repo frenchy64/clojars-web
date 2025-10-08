@@ -21,19 +21,22 @@
 #       clojure-version: '1.12.3.1577'
 # ```
 #
-# After the workflow completes, download the attested artifacts (JAR and POM):
+# DEPLOYMENT: After the workflow completes, download and deploy the attested artifacts.
 #
+# For SINGLE JAR projects:
 # ```yaml
 # jobs:
 #   build:
 #     uses: clojars/clojars-web/.github/workflows/attestable-clojure-cli.yml@main
-#     # ... inputs ...
+#     with:
+#       java-version: '21'
+#       clojure-version: '1.12.3.1577'
 #   
 #   deploy:
 #     needs: build
 #     runs-on: ubuntu-latest
 #     steps:
-#       - name: Download attested artifacts
+#       - name: Download attested artifacts from build job
 #         uses: actions/download-artifact@v4
 #         with:
 #           name: attested-jar
@@ -41,12 +44,58 @@
 #       
 #       - name: Deploy to Clojars
 #         run: |
-#           # Use Maven deploy:deploy-file to upload attested artifacts
+#           JAR_FILE=$(find artifacts/ -name "*.jar" -type f | head -n 1)
+#           POM_FILE=$(find artifacts/ -name "*.pom" -o -name "pom.xml" | head -n 1)
 #           mvn deploy:deploy-file \
-#             -Dfile=artifacts/*.jar \
-#             -DpomFile=artifacts/pom.xml \
+#             -Dfile="$JAR_FILE" \
+#             -DpomFile="$POM_FILE" \
 #             -DrepositoryId=clojars \
 #             -Durl=https://repo.clojars.org
+#         env:
+#           CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
+#           CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}
+# ```
+#
+# For MULTIPLE JARs (e.g., monorepo or multi-module project):
+# ```yaml
+# jobs:
+#   build:
+#     uses: clojars/clojars-web/.github/workflows/attestable-clojure-cli.yml@main
+#     with:
+#       java-version: '21'
+#       clojure-version: '1.12.3.1577'
+#   
+#   deploy:
+#     needs: build
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Download attested artifacts from build job
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: attested-jar
+#           path: artifacts/
+#       
+#       - name: Deploy all JARs to Clojars
+#         run: |
+#           # Deploy each JAR file found
+#           for JAR_FILE in $(find artifacts/ -name "*.jar" -type f); do
+#             JAR_DIR=$(dirname "$JAR_FILE")
+#             JAR_BASE=$(basename "$JAR_FILE" .jar)
+#             # Find matching POM
+#             POM_FILE=""
+#             [ -f "$JAR_DIR/$JAR_BASE.pom" ] && POM_FILE="$JAR_DIR/$JAR_BASE.pom"
+#             [ -f "$JAR_DIR/pom.xml" ] && POM_FILE="$JAR_DIR/pom.xml"
+#             if [ -z "$POM_FILE" ]; then
+#               echo "No POM found for $JAR_FILE, skipping"
+#               continue
+#             fi
+#             echo "Deploying $JAR_FILE with $POM_FILE"
+#             mvn deploy:deploy-file \
+#               -Dfile="$JAR_FILE" \
+#               -DpomFile="$POM_FILE" \
+#               -DrepositoryId=clojars \
+#               -Durl=https://repo.clojars.org
+#           done
 #         env:
 #           CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
 #           CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}

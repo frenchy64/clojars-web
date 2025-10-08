@@ -92,29 +92,61 @@ jobs:
 
 ## Deploying Attested Artifacts
 
-After the build workflow completes, download and deploy the attested artifacts:
+After the build workflow completes, download and deploy the attested artifacts. The reusable workflows upload artifacts that you can download in a subsequent deploy job.
+
+### Available Artifacts
+
+The workflows upload the following artifacts:
+
+- **attested-jar**: Contains the built JAR file(s) and POM file(s)
+- **attestation-metadata**: Contains GitHub attestation information
+- **dependency-checksums**: Contains SHA256 checksums of all dependencies
+- **provenance-report**: Contains complete provenance analysis
+
+### Single JAR/POM Deployment
+
+For projects that build a single JAR:
 
 ```yaml
 jobs:
   build:
     uses: clojars/clojars-web/.github/workflows/attestable-build-lein.yml@main
-    # ... inputs ...
+    with:
+      java-version: '21'
+      lein-version: '2.12.0'
   
   deploy:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      # Step 1: Download the attested artifacts from the build job
       - name: Download attested artifacts
         uses: actions/download-artifact@v4
         with:
           name: attested-jar
           path: artifacts/
       
-      - name: Deploy to Clojars with Maven
+      # Step 2: List downloaded files (for verification)
+      - name: List artifacts
         run: |
+          echo "Downloaded artifacts:"
+          ls -lah artifacts/
+      
+      # Step 3: Deploy to Clojars using Maven
+      - name: Deploy to Clojars
+        run: |
+          # Find the JAR file
+          JAR_FILE=$(find artifacts/ -name "*.jar" -type f | head -n 1)
+          # Find the POM file
+          POM_FILE=$(find artifacts/ -name "*.pom" -o -name "pom.xml" | head -n 1)
+          
+          echo "Deploying JAR: $JAR_FILE"
+          echo "Using POM: $POM_FILE"
+          
+          # Deploy with Maven
           mvn deploy:deploy-file \
-            -Dfile=artifacts/*.jar \
-            -DpomFile=artifacts/pom.xml \
+            -Dfile="$JAR_FILE" \
+            -DpomFile="$POM_FILE" \
             -DrepositoryId=clojars \
             -Durl=https://repo.clojars.org
         env:
@@ -122,7 +154,127 @@ jobs:
           CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}
 ```
 
-The attested artifacts are also available as workflow artifacts you can download from the Actions tab.
+### Multiple JARs/POMs Deployment
+
+For projects that build multiple JARs (e.g., parent project with submodules):
+
+```yaml
+jobs:
+  build:
+    uses: clojars/clojars-web/.github/workflows/attestable-build-lein.yml@main
+    with:
+      java-version: '21'
+      lein-version: '2.12.0'
+  
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Download the attested artifacts from the build job
+      - name: Download attested artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: attested-jar
+          path: artifacts/
+      
+      # Step 2: List all downloaded files
+      - name: List all artifacts
+        run: |
+          echo "All downloaded artifacts:"
+          find artifacts/ -type f -ls
+      
+      # Step 3: Deploy each JAR/POM pair to Clojars
+      - name: Deploy all JARs to Clojars
+        run: |
+          # Find all JAR files
+          JAR_FILES=$(find artifacts/ -name "*.jar" -type f)
+          
+          # Check if we found any JARs
+          if [ -z "$JAR_FILES" ]; then
+            echo "Error: No JAR files found in artifacts/"
+            exit 1
+          fi
+          
+          # Deploy each JAR
+          for JAR_FILE in $JAR_FILES; do
+            echo "Processing JAR: $JAR_FILE"
+            
+            # Determine the corresponding POM file
+            # Look for POM in same directory as JAR
+            JAR_DIR=$(dirname "$JAR_FILE")
+            JAR_BASE=$(basename "$JAR_FILE" .jar)
+            
+            # Try to find matching POM (could be .pom or pom.xml)
+            POM_FILE=""
+            if [ -f "$JAR_DIR/$JAR_BASE.pom" ]; then
+              POM_FILE="$JAR_DIR/$JAR_BASE.pom"
+            elif [ -f "$JAR_DIR/pom.xml" ]; then
+              POM_FILE="$JAR_DIR/pom.xml"
+            else
+              echo "Warning: No POM found for $JAR_FILE, skipping"
+              continue
+            fi
+            
+            echo "Found matching POM: $POM_FILE"
+            
+            # Deploy this JAR/POM pair
+            echo "Deploying $JAR_FILE to Clojars..."
+            mvn deploy:deploy-file \
+              -Dfile="$JAR_FILE" \
+              -DpomFile="$POM_FILE" \
+              -DrepositoryId=clojars \
+              -Durl=https://repo.clojars.org
+            
+            if [ $? -eq 0 ]; then
+              echo "✓ Successfully deployed $(basename $JAR_FILE)"
+            else
+              echo "✗ Failed to deploy $(basename $JAR_FILE)"
+              exit 1
+            fi
+          done
+          
+          echo "All artifacts deployed successfully!"
+        env:
+          CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
+          CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}
+```
+
+### Downloading Artifacts Manually
+
+You can also download artifacts manually from the GitHub Actions UI:
+
+1. Go to the workflow run in GitHub Actions
+2. Scroll to the "Artifacts" section at the bottom
+3. Click on "attested-jar" to download a ZIP file
+4. Extract the ZIP to get your JAR and POM files
+5. Deploy using Maven CLI locally:
+   ```bash
+   mvn deploy:deploy-file \
+     -Dfile=path/to/your-artifact.jar \
+     -DpomFile=path/to/pom.xml \
+     -DrepositoryId=clojars \
+     -Durl=https://repo.clojars.org \
+     -Dusername=$CLOJARS_USERNAME \
+     -Dpassword=$CLOJARS_PASSWORD
+   ```
+
+### Maven Configuration
+
+Ensure your `~/.m2/settings.xml` has Clojars repository configured:
+
+```xml
+<settings>
+  <servers>
+    <server>
+      <id>clojars</id>
+      <username>${env.CLOJARS_USERNAME}</username>
+      <password>${env.CLOJARS_PASSWORD}</password>
+    </server>
+  </servers>
+</settings>
+```
+
+The attested artifacts contain GitHub attestations that Clojars will verify came from a trusted workflow before accepting the deployment.
 
 ## Security Model
 
