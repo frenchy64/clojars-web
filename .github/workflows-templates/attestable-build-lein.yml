@@ -1,0 +1,143 @@
+# Clojars Attestable Build Workflow for Leiningen Projects
+#
+# This workflow template provides a foundation for creating attestable builds
+# that can be verified by Clojars. It includes:
+# - Reproducible build environment
+# - Build artifact generation
+# - Artifact attestation via GitHub Actions
+# - Integration with Clojars verification system
+#
+# To use this workflow:
+# 1. Copy it to .github/workflows/release.yml in your project
+# 2. Update the Clojure and Java versions as needed
+# 3. Customize the build and test steps for your project
+# 4. Set up CLOJARS_USERNAME and CLOJARS_TOKEN secrets
+
+name: Attestable Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  build-and-attest:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # Required for attestation
+      contents: write  # Required for creating releases
+      attestations: write  # Required for artifact attestation
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git describe
+      
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+      
+      - name: Install Clojure CLI
+        uses: DeLaGuardo/setup-clojure@master
+        with:
+          lein: 2.11.2  # or specify your required version
+      
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Verify version matches tag
+        run: |
+          PROJECT_VERSION=$(lein pprint :version | tr -d '"')
+          if [ "$PROJECT_VERSION" != "${{ steps.get_version.outputs.VERSION }}" ]; then
+            echo "ERROR: project.clj version ($PROJECT_VERSION) doesn't match tag (${{ steps.get_version.outputs.VERSION }})"
+            exit 1
+          fi
+      
+      - name: Run tests
+        run: lein test
+      
+      - name: Build JAR
+        run: |
+          lein jar
+          lein pom
+        env:
+          # Set SOURCE_DATE_EPOCH for more reproducible builds
+          SOURCE_DATE_EPOCH: ${{ github.event.repository.updated_at }}
+      
+      - name: Find built artifacts
+        id: artifacts
+        run: |
+          JAR_FILE=$(find target -name "*.jar" -not -name "*-standalone.jar" | head -n 1)
+          POM_FILE="pom.xml"
+          echo "JAR_FILE=$JAR_FILE" >> $GITHUB_OUTPUT
+          echo "POM_FILE=$POM_FILE" >> $GITHUB_OUTPUT
+          echo "Found JAR: $JAR_FILE"
+          echo "Found POM: $POM_FILE"
+      
+      # Generate attestation for the built artifacts
+      - name: Attest JAR artifact
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ steps.artifacts.outputs.JAR_FILE }}
+      
+      - name: Create attestation metadata file
+        run: |
+          cat > attestation-metadata.json <<EOF
+          {
+            "workflow_run_id": "${{ github.run_id }}",
+            "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "commit_sha": "${{ github.sha }}",
+            "commit_tag": "${{ steps.get_version.outputs.TAG }}",
+            "repository": "${{ github.repository }}",
+            "attested_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          cat attestation-metadata.json
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: |
+            ${{ steps.artifacts.outputs.JAR_FILE }}
+            ${{ steps.artifacts.outputs.POM_FILE }}
+            attestation-metadata.json
+      
+      # Optional: Deploy to Clojars
+      # Uncomment and configure if you want automatic deployment
+      # - name: Deploy to Clojars
+      #   run: |
+      #     lein deploy clojars
+      #   env:
+      #     CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
+      #     CLOJARS_PASSWORD: ${{ secrets.CLOJARS_TOKEN }}
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            ${{ steps.artifacts.outputs.JAR_FILE }}
+            attestation-metadata.json
+          body: |
+            ## Release ${{ steps.get_version.outputs.TAG }}
+            
+            Built with attestation: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+            Commit: ${{ github.sha }}
+            
+            ### Verification
+            
+            This build has been attested through GitHub Actions. You can verify the attestation using:
+            
+            ```bash
+            gh attestation verify ${{ steps.artifacts.outputs.JAR_FILE }} --repo ${{ github.repository }}
+            ```
