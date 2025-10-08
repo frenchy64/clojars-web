@@ -7,6 +7,7 @@
    [clojars.file-utils :as fu]
    [clojars.maven :as maven]
    [clojars.stats :as stats]
+   [clojars.verification-db :as verification-db]
    [clojars.web.common :refer [audit-table html-doc jar-link
                                tag jar-url jar-name jar-versioned-url group-is-name?
                                user-link jar-fork? jar-notice single-fork-notice
@@ -301,6 +302,76 @@
     {:readonly "readonly" :rows 4}
     (badge-markdown jar true)]))
 
+(defn- verification-badge [verification]
+  "Display a verification status badge."
+  (when verification
+    (let [status (:verification_status verification)]
+      (case status
+        "verified"
+        [:span.verification-badge.verified
+         {:title "This version has been verified"}
+         "✓ Verified"]
+        "partial"
+        [:span.verification-badge.partial
+         {:title "This version has been partially verified"}
+         "⚠ Partially Verified"]
+        "pending"
+        [:span.verification-badge.pending
+         {:title "Verification is pending"}
+         "⏳ Verification Pending"]
+        "failed"
+        [:span.verification-badge.failed
+         {:title "Verification failed"}
+         "✗ Verification Failed"]
+        ;; unverified or unknown
+        [:span.verification-badge.unverified
+         {:title "This version has not been verified"}
+         "? Unverified"]))))
+
+(defn- verification-info [db jar]
+  "Display verification information for a jar version."
+  (when-let [verification (verification-db/find-jar-verification
+                           db
+                           (:group_name jar)
+                           (:jar_name jar)
+                           (:version jar))]
+    (list
+     [:h4 "Build Verification"]
+     (verification-badge verification)
+     (when-let [method (:verification_method verification)]
+       [:p [:strong "Method: "] method])
+     (when-let [repo-url (:repo_url verification)]
+       [:p [:strong "Repository: "] (safe-link-to repo-url repo-url)])
+     (when-let [commit-sha (:commit_sha verification)]
+       [:p [:strong "Commit: "] [:code commit-sha]])
+     (when-let [commit-tag (:commit_tag verification)]
+       [:p [:strong "Tag: "] [:code commit-tag]])
+     (when-let [attestation-url (:attestation_url verification)]
+       [:p (safe-link-to attestation-url "View Attestation")])
+     (when-let [script-url (:reproducibility_script_url verification)]
+       [:p (safe-link-to script-url "Reproducibility Script")])
+     (when-let [notes (:verification_notes verification)]
+       [:p.verification-notes [:small notes]]))))
+
+(defn- verification-metrics-display [db jar]
+  "Display verification metrics for all versions of a jar."
+  (let [metrics (verification-db/verification-metrics
+                 db
+                 (:group_name jar)
+                 (:jar_name jar))
+        rate (:verification-rate metrics)]
+    (when (pos? (:total-versions metrics))
+      (list
+       [:h4 "Verification Metrics"]
+       [:p
+        (format "%d of %d versions verified (%.0f%%)"
+                (:verified-count metrics)
+                (:total-versions metrics)
+                (* 100 rate))]
+       (when (< rate 1.0)
+         [:p.verification-warning
+          [:small "⚠ Not all versions have been verified. Use caution with unverified versions."]])))))
+
 (defn show-jar [db stats account
                 {:keys [group_name jar_name verified-group? version] :as jar}
                 recent-versions version-count]
@@ -348,6 +419,10 @@
       [:ul#jar-sidebar.col-xs-12.col-sm-3
        [:li (pushed-by jar)]
        [:li (versions jar recent-versions version-count)]
+       (when-let [verification-display (verification-info db jar)]
+         [:li.verification-info verification-display])
+       (when-let [metrics-display (verification-metrics-display db jar)]
+         [:li.verification-metrics metrics-display])
        (when-let [dependencies (dependencies db jar)]
          [:li dependencies])
        (when-let [dependents (dependents db jar version-count)]
