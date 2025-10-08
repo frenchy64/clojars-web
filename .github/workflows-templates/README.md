@@ -9,13 +9,16 @@ This directory contains GitHub Actions workflow templates for creating attestabl
 For projects using Leiningen (`project.clj`).
 
 **Features:**
-- Automatic triggering on version tags (e.g., `v1.0.0`)
-- Version verification between tag and `project.clj`
-- Test execution before building
-- JAR artifact generation with `lein jar`
-- Build provenance attestation via GitHub Actions
-- Optional automatic deployment to Clojars
-- GitHub Release creation with attestation metadata
+- **Secure multi-job pipeline** with isolated dependency preparation, offline building, and provenance verification
+- **Automatic triggering** on version tags (e.g., `v1.0.0`)
+- **Official Leiningen installer** with SHA256 verification
+- **Minimal profile configuration** excluding user, test, and dev profiles for reproducibility
+- **Offline build** using only pre-verified dependencies
+- **Complete provenance tracking** - verifies every file in the JAR against source or dependencies
+- **Automated security checks** - fails build if unverified Clojure files or suspicious class files found
+- **Build attestation** via GitHub Actions
+- **Comprehensive provenance report** included with release
+- **No automatic deployment** - requires manual review of attestation before Clojars deployment
 
 ### 2. `attestable-build-tools.yml`
 
@@ -84,16 +87,103 @@ For projects using tools.build (`deps.edn` + `build.clj`).
 2. Copy the appropriate template to `.github/workflows/release.yml`
 
 3. Customize the workflow:
-   - Update Java version if needed
-   - Update Clojure/Leiningen version if needed
-   - Modify test command if your project uses a different alias/profile
-   - Adjust build commands if needed
+   - Update Java version if needed (default: Java 21)
+   - Update Leiningen version in env vars if needed (default: 2.12.0)
+   - The workflow uses minimal profiles by default (`-user,-test,-dev`)
+   - Review the provenance verification requirements for your project
 
-### Step 3: Configure Secrets (Optional, for Automatic Deployment)
+### Step 3: Understanding the Leiningen Workflow Pipeline
 
-If you want automatic deployment to Clojars:
+The Leiningen workflow uses a secure 3-job pipeline:
 
-1. Generate a Clojars deploy token:
+**Job 1: prepare-dependencies**
+- Downloads the official Leiningen installer with SHA256 verification
+- Downloads project dependencies
+- Creates a minimal Maven cache with only required JARs
+- Calculates checksums for all dependencies
+- Uploads the minimal cache and checksums for later jobs
+
+**Job 2: build-artifacts**
+- Restores and verifies the minimal dependency cache
+- Builds JAR and POM **offline** (`LEIN_OFFLINE=true`)
+- Generates build attestation
+- Uploads artifacts for verification
+
+**Job 3: verify-provenance**
+- Analyzes every file in the built JAR
+- Verifies each file matches either:
+  - Source repository (exact SHA256 match)
+  - A dependency JAR (exact SHA256 match)
+- **Fails the build** if:
+  - Any `.clj` file has unknown provenance
+  - Any `.class` file has checksum mismatch with dependencies
+- Generates comprehensive provenance report
+- Creates GitHub Release with all artifacts and reports
+
+### Step 4: Testing Your Workflow
+
+1. Ensure your `project.clj` version matches your intended tag
+
+2. Create and push a test tag:
+   ```bash
+   git tag v0.0.1-test
+   git push origin v0.0.1-test
+   ```
+
+3. Monitor the workflow run on GitHub Actions:
+   - Check that all three jobs complete successfully
+   - Review the provenance report in the artifacts
+   - Verify the attestation was created
+
+4. Delete the test tag after verification:
+   ```bash
+   git tag -d v0.0.1-test
+   git push origin :refs/tags/v0.0.1-test
+   gh release delete v0.0.1-test  # if release was created
+   ```
+
+### Step 5: Deploying to Clojars (Manual Process)
+
+**Important:** The workflow does NOT automatically deploy to Clojars. This is intentional to ensure full review of attestation and provenance.
+
+To deploy after a successful build:
+
+1. Download the JAR from the GitHub Release
+2. Review the provenance report
+3. Verify the attestation:
+   ```bash
+   gh attestation verify <jar-file> --repo yourname/yourproject
+   ```
+4. Deploy manually to Clojars:
+   ```bash
+   lein deploy clojars
+   ```
+   Or use your preferred deployment method with the verified artifacts.
+
+### Troubleshooting Provenance Verification
+
+**"Clojure source file with unknown provenance" error:**
+- This means a `.clj` file in your JAR doesn't match any file in your source repo or dependencies
+- Check if you have generated code or AOT compilation artifacts
+- Verify all source files are committed to git
+- Review the provenance report for the specific files
+
+**"Checksum mismatch with dependency" error:**
+- This indicates a `.class` file that matches a dependency by name but not by content
+- This could indicate tampering or version mismatch
+- Review your dependencies and ensure no local modifications
+
+**Workflow fails during offline build:**
+- Verify all dependencies are declared in `project.clj`
+- Check for dependencies that download additional artifacts at runtime
+- Review the `prepare-dependencies` job logs
+
+### Step 6: Configure Secrets (NOT Recommended for Automatic Deployment)
+
+The workflow template does NOT include automatic Clojars deployment. If you choose to add it:
+
+1. **⚠️ Warning:** Automatic deployment bypasses manual attestation review
+2. Generate a Clojars deploy token:
    - Log in to https://clojars.org
    - Go to Settings → Deploy Tokens
    - Create a new token
@@ -104,23 +194,7 @@ If you want automatic deployment to Clojars:
      - `CLOJARS_USERNAME`: Your Clojars username
      - `CLOJARS_TOKEN`: Your Clojars deploy token
 
-3. Uncomment the deployment step in the workflow file
-
-### Step 4: Create a Release
-
-1. Update your project version
-2. Commit your changes
-3. Create and push a version tag:
-   ```bash
-   git tag v1.0.0
-   git push origin v1.0.0
-   ```
-
-4. The workflow will automatically:
-   - Build your project
-   - Run tests
-   - Generate attestation
-   - Create a GitHub Release with the JAR and attestation metadata
+3. Add deployment step to the workflow (not recommended without manual review)
 
 ## Verification
 
