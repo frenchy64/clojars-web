@@ -83,7 +83,7 @@ curl http://localhost:8080/api/artifacts/org.clojure/clojure/verification/metric
 ## Security Considerations
 
 ✅ HTTPS-only repository URLs
-✅ Whitelist approach (GitHub/GitLab only)
+✅ Allowlist approach (GitHub/GitLab only)
 ✅ No external code execution
 ✅ Sanitized URL display
 ✅ SQL injection protected (parameterized queries)

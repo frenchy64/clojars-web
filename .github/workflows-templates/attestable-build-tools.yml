@@ -8,12 +8,24 @@
 #
 # To use this workflow:
 # 1. Copy it to .github/workflows/release.yml in your project
-# 2. Update the Java version and Clojure version as needed
+# 2. Update the Java version if needed
 # 3. Ensure your build configuration version matches your git tag
 # 4. Push a version tag (e.g., v1.0.0) to trigger the build
 #
 # Note: This workflow does NOT deploy to Clojars automatically.
 # Deployment should only happen after full attestation is complete.
+#
+# TODO: Establish conventions for expected tools/aliases in projects
+# - Currently assumes `-T:build jar` for building JARs
+# - May need to standardize alias names across ecosystem (e.g., :build, :deploy)
+# - Consider supporting alternative build aliases or auto-detection
+#
+# TODO: Handle gitlibs reproducibility concerns
+# - Gitlibs may produce non-reproducible artifacts during prep
+# - Need to record each gitlib's commit hash
+# - Need to checksum generated artifacts in gitlibs during prep
+# - Consider creating minimal gitlibs cache similar to Maven cache
+# - Verify gitlibs checksums across all jobs
 
 name: Attestable Release Build (tools.build)
 
@@ -25,7 +37,11 @@ on:
 
 env:
   # Pinned Clojure CLI version for reproducibility
-  CLOJURE_VERSION: "1.11.3.1463"
+  CLOJURE_VERSION: "1.12.3.1577"
+  # Immutable URL for the Clojure CLI installer (pinned to version tag)
+  CLOJURE_INSTALLER_URL: "https://github.com/clojure/brew-install/releases/download/1.12.3.1577/linux-install.sh"
+  # SHA256 of the linux-install.sh script from the pinned version
+  CLOJURE_INSTALLER_SHA256: "a55106244ca93ef7b61309e9dca4b248257685870824a8abe2efa706ede8241f"
 
 jobs:
   # Job 1: Download and cache dependencies in isolation
@@ -44,17 +60,49 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
       
-      - name: Download and install Clojure CLI
+      - name: Download and verify Clojure CLI installer
         run: |
-          # Download Clojure CLI installer
-          curl -sL https://github.com/clojure/brew-install/releases/download/$CLOJURE_VERSION/linux-install.sh -o install-clojure.sh
+          # Download Clojure CLI installer from immutable version tag
+          curl -sL "$CLOJURE_INSTALLER_URL" -o install-clojure.sh
           
-          # Verify checksum (you should add the actual checksum here)
-          # For now, we'll install directly but this should be checksummed in production
+          # Verify the SHA256 checksum of the installer
+          echo "$CLOJURE_INSTALLER_SHA256  install-clojure.sh" | sha256sum -c - || {
+            echo "ERROR: Clojure CLI installer checksum verification failed!"
+            echo "Expected: $CLOJURE_INSTALLER_SHA256"
+            echo "Got: $(sha256sum install-clojure.sh | cut -d' ' -f1)"
+            exit 1
+          }
+          
           chmod +x install-clojure.sh
+      
+      - name: Install Clojure CLI
+        run: |
+          # Install Clojure CLI
           sudo ./install-clojure.sh
           
           clojure --version
+          
+          # Save Clojure installation for later jobs
+          mkdir -p /tmp/clojure-install
+          cp install-clojure.sh /tmp/clojure-install/
+          
+          # Copy installed Clojure CLI files
+          if [[ -d /usr/local/lib/clojure ]]; then
+            cp -r /usr/local/lib/clojure /tmp/clojure-install/
+          fi
+          if [[ -f /usr/local/bin/clojure ]]; then
+            cp /usr/local/bin/clojure /tmp/clojure-install/
+          fi
+          if [[ -f /usr/local/bin/clj ]]; then
+            cp /usr/local/bin/clj /tmp/clojure-install/
+          fi
+      
+      - name: Calculate Clojure installation checksums
+        run: |
+          cd /tmp/clojure-install
+          find . -type f -exec sha256sum {} \; | sort > /tmp/clojure-checksums.txt
+          echo "Clojure installation checksums calculated"
+          cat /tmp/clojure-checksums.txt
       
       - name: Download dependencies
         run: |
@@ -131,13 +179,21 @@ jobs:
           path: /tmp/minimal-m2/
           retention-days: 1
       
-      - name: Upload dependency checksums
+      - name: Upload Clojure installation
+        uses: actions/upload-artifact@v4
+        with:
+          name: clojure-install
+          path: /tmp/clojure-install/
+          retention-days: 1
+      
+      - name: Upload dependency and Clojure checksums
         uses: actions/upload-artifact@v4
         with:
           name: deps-checksums
           path: |
             /tmp/deps-checksums.txt
             /tmp/required-jars.txt
+            /tmp/clojure-checksums.txt
           retention-days: 1
 
   # Job 2: Build artifacts offline with verified dependencies
@@ -180,6 +236,25 @@ jobs:
           
           echo "All dependency checksums verified successfully"
       
+      - name: Download Clojure installation
+        uses: actions/download-artifact@v4
+        with:
+          name: clojure-install
+          path: /tmp/clojure-install/
+      
+      - name: Verify Clojure installation checksums
+        run: |
+          cd /tmp/clojure-install
+          
+          # Verify all Clojure files match their expected checksums
+          if ! sha256sum -c /tmp/clojure-checksums.txt; then
+            echo "ERROR: Clojure installation checksum verification failed!"
+            echo "The downloaded Clojure installation does not match the expected checksums."
+            exit 1
+          fi
+          
+          echo "All Clojure installation checksums verified successfully"
+      
       - name: Restore Maven cache and gitlibs
         run: |
           # Restore the minimal Maven cache
@@ -198,12 +273,25 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
       
-      - name: Install Clojure CLI
+      - name: Restore Clojure CLI
         run: |
-          # Re-install Clojure CLI
-          curl -sL https://github.com/clojure/brew-install/releases/download/$CLOJURE_VERSION/linux-install.sh -o install-clojure.sh
-          chmod +x install-clojure.sh
-          sudo ./install-clojure.sh
+          # Restore Clojure CLI from verified installation
+          sudo mkdir -p /usr/local/lib
+          sudo mkdir -p /usr/local/bin
+          
+          if [[ -d /tmp/clojure-install/clojure ]]; then
+            sudo cp -r /tmp/clojure-install/clojure /usr/local/lib/
+          fi
+          if [[ -f /tmp/clojure-install/clojure ]]; then
+            sudo cp /tmp/clojure-install/clojure /usr/local/bin/
+            sudo chmod +x /usr/local/bin/clojure
+          fi
+          if [[ -f /tmp/clojure-install/clj ]]; then
+            sudo cp /tmp/clojure-install/clj /usr/local/bin/
+            sudo chmod +x /usr/local/bin/clj
+          fi
+          
+          clojure --version
       
       - name: Extract version from tag
         id: get_version
@@ -461,6 +549,7 @@ jobs:
             /tmp/provenance-report.txt
             /tmp/deps-checksums.txt
             /tmp/required-jars.txt
+            /tmp/clojure-checksums.txt
           body: |
             ## Release ${{ steps.get_version.outputs.TAG }}
             
@@ -481,154 +570,14 @@ jobs:
             
             See the attached `provenance-report.txt` for detailed analysis of all files in the JAR.
             
-            ### Dependency Checksums
+            ### Dependency and Tool Checksums
             
-            The following files contain complete dependency information:
+            The following files contain complete dependency and tooling information:
             - `deps-checksums.txt` - SHA256 checksums of all dependencies
             - `required-jars.txt` - List of all JAR files used in the build
+            - `clojure-checksums.txt` - SHA256 checksums of Clojure CLI installation
             
             ### Note
             
             This build was created with isolated, verified dependencies and full provenance tracking.
             Deploy to Clojars only after reviewing the attestation and provenance report.
-
-on:
-  push:
-    tags:
-      - 'v*'  # Trigger on version tags like v1.0.0
-  workflow_dispatch:  # Allow manual triggering
-
-jobs:
-  build-and-attest:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write  # Required for attestation
-      contents: write  # Required for creating releases
-      attestations: write  # Required for artifact attestation
-      
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Full history for git describe
-      
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: 'maven'
-      
-      - name: Install Clojure CLI
-        uses: DeLaGuardo/setup-clojure@master
-        with:
-          cli: 1.11.3.1463  # or specify your required version
-      
-      - name: Extract version from tag
-        id: get_version
-        run: |
-          echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-      
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.m2/repository
-            ~/.gitlibs
-          key: ${{ runner.os }}-clojure-${{ hashFiles('**/deps.edn') }}
-          restore-keys: |
-            ${{ runner.os }}-clojure-
-      
-      - name: Run tests
-        run: clojure -M:test
-      
-      - name: Build JAR
-        run: |
-          clojure -T:build jar
-        env:
-          # Set SOURCE_DATE_EPOCH for more reproducible builds
-          SOURCE_DATE_EPOCH: ${{ github.event.repository.updated_at }}
-      
-      - name: Find built artifacts
-        id: artifacts
-        run: |
-          JAR_FILE=$(find target -name "*.jar" | head -n 1)
-          POM_FILE=$(find target -name "pom.xml" | head -n 1)
-          echo "JAR_FILE=$JAR_FILE" >> $GITHUB_OUTPUT
-          echo "POM_FILE=$POM_FILE" >> $GITHUB_OUTPUT
-          echo "Found JAR: $JAR_FILE"
-          echo "Found POM: $POM_FILE"
-      
-      # Generate attestation for the built artifacts
-      - name: Attest JAR artifact
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: ${{ steps.artifacts.outputs.JAR_FILE }}
-      
-      - name: Create attestation metadata file
-        run: |
-          cat > attestation-metadata.json <<EOF
-          {
-            "workflow_run_id": "${{ github.run_id }}",
-            "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
-            "commit_sha": "${{ github.sha }}",
-            "commit_tag": "${{ steps.get_version.outputs.TAG }}",
-            "repository": "${{ github.repository }}",
-            "attested_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "artifact_name": "$(basename ${{ steps.artifacts.outputs.JAR_FILE }})"
-          }
-          EOF
-          cat attestation-metadata.json
-      
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-artifacts
-          path: |
-            ${{ steps.artifacts.outputs.JAR_FILE }}
-            ${{ steps.artifacts.outputs.POM_FILE }}
-            attestation-metadata.json
-      
-      # Optional: Deploy to Clojars
-      # Uncomment and configure if you want automatic deployment
-      # Note: You'll need to add deploy functionality to your build.clj
-      # - name: Deploy to Clojars
-      #   run: |
-      #     clojure -T:build deploy
-      #   env:
-      #     CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
-      #     CLOJARS_PASSWORD: ${{ secrets.CLOJARS_TOKEN }}
-      
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: |
-            ${{ steps.artifacts.outputs.JAR_FILE }}
-            attestation-metadata.json
-          body: |
-            ## Release ${{ steps.get_version.outputs.TAG }}
-            
-            Built with attestation: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            
-            Commit: ${{ github.sha }}
-            
-            ### Verification
-            
-            This build has been attested through GitHub Actions. You can verify the attestation using:
-            
-            ```bash
-            gh attestation verify ${{ steps.artifacts.outputs.JAR_FILE }} --repo ${{ github.repository }}
-            ```
-            
-            ### Reproducibility
-            
-            To reproduce this build locally:
-            
-            ```bash
-            git clone https://github.com/${{ github.repository }}
-            cd $(basename ${{ github.repository }})
-            git checkout ${{ github.sha }}
-            clojure -T:build jar
-            ```

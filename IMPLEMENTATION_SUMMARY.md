@@ -217,7 +217,7 @@ Verification info is shown in the sidebar rather than prominently in the main co
 
 ### Implemented
 - HTTPS-only repository URLs
-- Whitelist approach (GitHub/GitLab)
+- Allowlist approach (GitHub/GitLab)
 - Sanitized URL display
 - No execution of external code
 
