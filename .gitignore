@@ -32,3 +32,4 @@ home
 !.clj-kondo/imports/kerodon
 bin/.cache
 .cpcache
+tmp/
