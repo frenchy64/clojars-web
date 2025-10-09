@@ -128,6 +128,35 @@ Tests can also be run via [kaocha](https://github.com/lambdaisland/kaocha):
 make test
 ```
 
+#### Running Integration Tests Locally
+
+To run integration tests locally, you'll need to set up the required infrastructure services (PostgreSQL, MinIO, and ElasticMQ). A convenience script is provided to automate this:
+
+```sh
+# Start all required services in Docker containers
+./bin/setup-test-env
+
+# Set environment variables and run tests
+export CLOJARS_ENVIRONMENT=test
+export DB_PORT=5432
+make migrate-db  # Run database migrations
+./bin/kaocha    # Run the tests
+```
+
+The `setup-test-env` script will:
+- Check that Docker, Java 21, and Clojure are installed
+- Start PostgreSQL on port 5432
+- Start MinIO on port 9000
+- Start ElasticMQ on port 9324
+- Verify that services are already running before starting new containers
+
+To stop the services when done:
+
+```sh
+docker stop clojars-test-postgres clojars-test-minio clojars-test-elasticmq
+docker rm clojars-test-postgres clojars-test-minio clojars-test-elasticmq
+```
+
 Deployment
 ----------
 
