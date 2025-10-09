@@ -141,6 +141,27 @@
   (db/do-commands tx
                   ["create index jars_idx_created on jars (created)"]))
 
+(defn- add-jar-verifications-table
+  [tx]
+  (db/do-commands tx
+                  [(str "create table jar_verifications "
+                        "(id serial not null primary key,"
+                        " group_name text not null,"
+                        " jar_name text not null,"
+                        " version text not null,"
+                        " verification_status text not null,"
+                        " verification_method text,"
+                        " repo_url text,"
+                        " commit_sha text,"
+                        " commit_tag text,"
+                        " attestation_url text,"
+                        " reproducibility_script_url text,"
+                        " verification_notes text,"
+                        " verified_at timestamp not null default current_timestamp,"
+                        " unique(group_name, jar_name, version))")
+                   "create index jar_verifications_idx0 on jar_verifications (group_name, jar_name)"
+                   "create index jar_verifications_idx1 on jar_verifications (verification_status)"]))
+
 (def migrations
   [#'initial-schema
    #'add-deploy-tokens-table
@@ -157,7 +178,8 @@
    #'add-group-settings-table
    #'rename-groups-to-permissions
    #'add-scope-to-permissions
-   #'add-created-index-to-jars-table])
+   #'add-created-index-to-jars-table
+   #'add-jar-verifications-table])
 
 (defn migrate [db]
   (db/do-commands db

@@ -3,6 +3,7 @@
    [clojars.db :as db]
    [clojars.http-utils :refer [wrap-cors-headers]]
    [clojars.stats :as stats]
+   [clojars.verification-db :as verification-db]
    [clojure.set :as set]
    [compojure.core :as compojure :refer [ANY context GET]]
    [compojure.route :refer [not-found]]
@@ -70,6 +71,40 @@
      {:message "Invalid from param. It should be in the format of yyyy-MM-ddTHH:mm:ssZ' or yyyy-MM-ddTHH:mm:ss.SSSZ."
       :from from-str})))
 
+(defn- get-verification-status
+  "Get verification status for a specific jar version."
+  [db group-id artifact-id version]
+  (if-let [verification (verification-db/find-jar-verification db group-id artifact-id version)]
+    (ring.util/response
+     (-> verification
+         (select-keys [:verification_status :verification_method :repo_url
+                       :commit_sha :commit_tag :attestation_url
+                       :reproducibility_script_url :verification_notes :verified_at])))
+    (not-found nil)))
+
+(defn- get-verification-metrics
+  "Get verification metrics for all versions of a jar."
+  [db group-id artifact-id]
+  (if (db/jar-exists db group-id artifact-id)
+    (ring.util/response
+     (verification-db/verification-metrics db group-id artifact-id))
+    (not-found nil)))
+
+(defn- get-all-verifications
+  "Get all verification records for a jar."
+  [db group-id artifact-id]
+  (if (db/jar-exists db group-id artifact-id)
+    (let [verifications (verification-db/find-jar-verifications db group-id artifact-id)]
+      (ring.util/response
+       {:verifications (mapv #(select-keys % [:version :verification_status
+                                               :verification_method :repo_url
+                                               :commit_sha :commit_tag
+                                               :attestation_url
+                                               :reproducibility_script_url
+                                               :verified_at])
+                             verifications)}))
+    (not-found nil)))
+
 (defn handler [db stats]
   (compojure/routes
    (context "/api" []
@@ -87,6 +122,19 @@
                   :group-id #"[^/]+"
                   :artifact-id #"[^/]+"] [group-id artifact-id]
                  (get-artifact db stats group-id artifact-id))
+            (GET ["/artifacts/:group-id/:artifact-id/:version/verification"
+                  :group-id #"[^/]+"
+                  :artifact-id #"[^/]+"
+                  :version #"[^/]+"] [group-id artifact-id version]
+                 (get-verification-status db group-id artifact-id version))
+            (GET ["/artifacts/:group-id/:artifact-id/verification/metrics"
+                  :group-id #"[^/]+"
+                  :artifact-id #"[^/]+"] [group-id artifact-id]
+                 (get-verification-metrics db group-id artifact-id))
+            (GET ["/artifacts/:group-id/:artifact-id/verification/all"
+                  :group-id #"[^/]+"
+                  :artifact-id #"[^/]+"] [group-id artifact-id]
+                 (get-all-verifications db group-id artifact-id))
             (GET ["/release-feed"] [from]
                  (get-release-feed db from))
             (GET "/users/:username" [username]
