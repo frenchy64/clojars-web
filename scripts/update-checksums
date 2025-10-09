@@ -1,0 +1,26 @@
+#!/bin/bash
+# Usage:
+# update-checksums releases/clojars-web-current.jar
+#
+# This script generates incremental checksum files for JAR and POM files
+# in the Clojars repository. It's designed to be run periodically (e.g., daily)
+# via cron to create checkpoint files that can be used to verify repository
+# integrity over time.
+#
+# The script creates .checksums/incremental-checksums-{N}.txt.gz files in the
+# repo bucket, where each file contains MD5 and SHA1 checksums for artifacts
+# that haven't been checksummed in previous runs.
+#
+# See: https://github.com/clojars/clojars-web/issues/149
+
+set -e
+
+clojars_jar=$1
+
+dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+
+source "$dir/set_default_java_opts.bash"
+
+mkdir -p tmp
+
+java "${JAVA_OPTS[@]}" -cp $clojars_jar clojure.main -m clojars.tools.generate-checksums tmp production 2> /dev/null

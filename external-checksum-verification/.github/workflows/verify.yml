@@ -1,0 +1,116 @@
+name: Verify Checksum Integrity
+
+on:
+  schedule:
+    # Run daily at 6 AM UTC (after main checksum generation likely completes)
+    - cron: '0 6 * * *'
+  workflow_dispatch:  # Allow manual triggering
+  push:
+    branches: [ main ]
+    paths:
+      - 'checksums/meta-checksums.edn'
+      - 'scripts/**'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git checks
+      
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-2
+          # Use GitHub OIDC or access keys stored in secrets
+          # For public read-only access to Clojars, no credentials needed
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        continue-on-error: true  # Allow to proceed even if credentials not set (for --no-sign-request)
+      
+      - name: Download checksum files
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/download-checksums.sh
+      
+      - name: Verify checksums
+        id: verify
+        run: |
+          ./scripts/verify-checksums.sh
+        continue-on-error: true
+      
+      - name: Run integrity checks
+        id: integrity
+        run: |
+          ./scripts/check-integrity.sh
+        continue-on-error: true
+      
+      - name: Update meta-checksums for new files
+        if: steps.verify.outcome == 'success'
+        run: |
+          ./scripts/update-checksums.sh --commit
+      
+      - name: Push updates
+        if: steps.verify.outcome == 'success'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git push
+        continue-on-error: true
+      
+      - name: Create alert issue on failure
+        if: steps.verify.outcome == 'failure' || steps.integrity.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const verifyFailed = '${{ steps.verify.outcome }}' === 'failure';
+            const integrityFailed = '${{ steps.integrity.outcome }}' === 'failure';
+            
+            let title = '🚨 Security Alert: Checksum Verification Failed';
+            let body = '## Security Alert\n\n';
+            
+            if (verifyFailed) {
+              body += '❌ **Checksum verification failed**\n\n';
+              body += 'One or more historical checksum files have been modified.\n';
+              body += 'This indicates potential tampering with the Clojars repository.\n\n';
+            }
+            
+            if (integrityFailed) {
+              body += '⚠️ **Integrity check failed**\n\n';
+              body += 'Anomalies detected in checksum files (gaps, duplicates, or size anomalies).\n\n';
+            }
+            
+            body += '### Actions Required\n\n';
+            body += '1. Review the workflow logs immediately\n';
+            body += '2. Check git history for unauthorized changes\n';
+            body += '3. Investigate the Clojars S3 bucket for tampering\n';
+            body += '4. Contact Clojars maintainers\n\n';
+            body += `### Workflow Run\n\n`;
+            body += `[View logs](${context.payload.repository.html_url}/actions/runs/${context.runId})\n`;
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['security', 'alert', 'critical']
+            });
+      
+      - name: Fail workflow on security issues
+        if: steps.verify.outcome == 'failure' || steps.integrity.outcome == 'failure'
+        run: |
+          echo "::error::Security verification failed. Check the logs and created issue."
+          exit 1
+      
+      - name: Upload verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-report
+          path: |
+            downloads/
+            checksums/meta-checksums.edn
+          if-no-files-found: warn

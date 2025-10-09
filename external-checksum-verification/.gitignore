@@ -1,0 +1,20 @@
+# Downloaded checksum files (temporary)
+downloads/
+
+# Temporary files
+*.tmp
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Log files
+*.log
