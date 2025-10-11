@@ -299,7 +299,7 @@ This implementation enables future features:
 1. **Web UI**: Display verification history on jar pages *(✅ IMPLEMENTED)*
 2. **API Endpoints**: REST API for history queries *(✅ IMPLEMENTED)*
 3. **Notifications**: Email/RSS when verification changes *(Not yet implemented)*
-4. **Reports**: Security reports on verification changes *(Not yet implemented)*
+4. **Reports**: Security reports on verification changes *(✅ IMPLEMENTED)*
 5. **Automation**: Batch processing for retroactive analysis *(Not yet implemented)*
 
 ### Implemented: Web UI for Verification History
@@ -374,12 +374,32 @@ The following enhancements from lines 295-303 remain:
    - RSS feed for verification changes
    - User subscriptions to specific jars
 
-4. **Reports**: Security reports on verification changes
-   - Dashboard for security team
-   - Statistics on compromise incidents
-   - Trend analysis
-
 5. **Automation**: Batch processing for retroactive analysis
+   - Background jobs to scan jars
+   - Automated transitive dependency analysis
+   - Scheduled security audits
+
+### Implemented: Security Reports
+
+Added comprehensive security reporting functionality:
+
+**New functions in `src/clojars/verification_db.clj`:**
+- `get-security-statistics` - Overall statistics by reason and action, plus recent critical events
+- `get-compromise-trend` - Trend data for compromise incidents over time
+- `get-verification-status-distribution` - Current distribution of verification statuses
+- `get-most-impacted-groups` - Groups most affected by verification downgrades
+- `generate-security-report` - Comprehensive report combining all statistics
+
+**New API endpoint:**
+- `GET /api/verification/security-report` - Returns comprehensive security report with:
+  - Counts by reason and action
+  - Recent critical events (last 30 days)
+  - 30-day compromise trend
+  - Verification status distribution
+  - Top 10 most impacted groups
+  - Total history entries
+
+The security report provides security teams with actionable insights into compromise incidents, trends, and affected artifacts.
    - Background jobs to scan jars
    - Automated transitive dependency analysis
    - Scheduled security audits

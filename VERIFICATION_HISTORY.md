@@ -244,6 +244,52 @@ curl https://clojars.org/api/verification/changes/by-action/jar_deleted?limit=50
 **Parameters:**
 - `limit` (optional): Number of results to return (default: 50, max: 100)
 
+### Security Report
+
+```bash
+GET /api/verification/security-report
+```
+
+Get a comprehensive security report with statistics and trends.
+
+**Example:**
+```bash
+curl https://clojars.org/api/verification/security-report
+```
+
+**Response includes:**
+- `statistics`: Counts by reason and action, recent critical events
+- `compromise-trend-30d`: Daily compromise incidents for last 30 days
+- `verification-distribution`: Current verification status distribution
+- `most-impacted-groups`: Top 10 groups with most verification downgrades
+- `generated-at`: Timestamp of report generation
+
+**Example response:**
+```json
+{
+  "generated-at": "2025-10-11T20:15:00Z",
+  "statistics": {
+    "reason-counts": {
+      "compromised_workflow": 45,
+      "backdoor_detected": 12
+    },
+    "action-counts": {
+      "verification_downgraded": 38,
+      "jar_deleted": 8
+    },
+    "recent-critical-events": [...],
+    "total-history-entries": 1234
+  },
+  "compromise-trend-30d": [...],
+  "verification-distribution": {
+    "verified": 8500,
+    "unverified": 2300,
+    "failed": 45
+  },
+  "most-impacted-groups": [...]
+}
+```
+
 ## Migration
 
 The new `jar_verification_history` table is added via database migration:

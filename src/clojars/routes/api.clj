@@ -157,6 +157,12 @@
                                        :changed_by :changed_at])
                      (verification-db/find-verification-changes-by-action db action limit-capped))})))
 
+(defn- get-security-report
+  "Get comprehensive security report with statistics and trends."
+  [db]
+  (ring.util/response
+   (verification-db/generate-security-report db)))
+
 (defn handler [db stats]
   (compojure/routes
    (context "/api" []
@@ -202,6 +208,8 @@
             (GET ["/verification/changes/by-action/:action"
                   :action #"[^/]+"] [action limit]
                  (get-verification-changes-by-action db action limit))
+            (GET ["/verification/security-report"] []
+                 (get-security-report db))
             (GET ["/release-feed"] [from]
                  (get-release-feed db from))
             (GET "/users/:username" [username]

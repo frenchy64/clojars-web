@@ -395,3 +395,97 @@
                   :version version})
     ;; Record in history
     (add-jar-verification-history db history-record)))
+
+;; Security Reports and Statistics
+
+(defn get-security-statistics
+  "Get overall security statistics for verification changes.
+   Returns counts by reason and action, plus recent critical events."
+  [db]
+  (let [;; Count changes by reason
+        reason-counts (q db
+                        {:select [:change_reason [[:count :*] :count]]
+                         :from :jar_verification_history
+                         :where [:not [:is :change_reason nil]]
+                         :group-by [:change_reason]
+                         :order-by [[[:count :*] :desc]]})
+        ;; Count changes by action
+        action-counts (q db
+                        {:select [:action_taken [[:count :*] :count]]
+                         :from :jar_verification_history
+                         :where [:not [:is :action_taken nil]]
+                         :group-by [:action_taken]
+                         :order-by [[[:count :*] :desc]]})
+        ;; Get recent critical events (last 30 days)
+        critical-reasons #{CHANGE-REASON-COMPROMISED-WORKFLOW
+                          CHANGE-REASON-HIJACKED-REPO
+                          CHANGE-REASON-BACKDOOR-DETECTED
+                          CHANGE-REASON-TRANSITIVE-DEPENDENCY-COMPROMISED}
+        recent-critical (q db
+                          {:select [:group_name :jar_name :version :change_reason
+                                   :action_taken :changed_at]
+                           :from :jar_verification_history
+                           :where [:and
+                                  [:in :change_reason critical-reasons]
+                                  [:> :changed_at
+                                   {:select [[[:raw "current_timestamp - interval '30 days'"]]]
+                                    :from [[{:select [[1 :dummy]]} :dual]]}]]
+                           :order-by [[:changed_at :desc]]
+                           :limit 100})]
+    {:reason-counts (into {} (map (juxt :change_reason :count) reason-counts))
+     :action-counts (into {} (map (juxt :action_taken :count) action-counts))
+     :recent-critical-events recent-critical
+     :total-history-entries (reduce + (map :count reason-counts))}))
+
+(defn get-compromise-trend
+  "Get trend data for compromise incidents over time.
+   Returns counts grouped by date for the last N days."
+  [db days]
+  (q db
+     {:select [[[:raw "date(changed_at)"] :date]
+               [[:count :*] :count]]
+      :from :jar_verification_history
+      :where [:and
+              [:in :change_reason
+               [CHANGE-REASON-COMPROMISED-WORKFLOW
+                CHANGE-REASON-HIJACKED-REPO
+                CHANGE-REASON-BACKDOOR-DETECTED
+                CHANGE-REASON-TRANSITIVE-DEPENDENCY-COMPROMISED]]
+              [:> :changed_at
+               {:select [[[:raw (str "current_timestamp - interval '" days " days'")]]]
+                :from [[{:select [[1 :dummy]]} :dual]]}]]
+      :group-by [[[:raw "date(changed_at)"]]]
+      :order-by [[:date :asc]]}))
+
+(defn get-verification-status-distribution
+  "Get current distribution of verification statuses across all jars."
+  [db]
+  (q db
+     {:select [:verification_status [[:count :*] :count]]
+      :from :jar_verifications
+      :group-by [:verification_status]
+      :order-by [[[:count :*] :desc]]}))
+
+(defn get-most-impacted-groups
+  "Get groups most impacted by verification downgrades."
+  [db limit]
+  (q db
+     {:select [:group_name [[:count :*] :downgrade_count]]
+      :from :jar_verification_history
+      :where [:= :action_taken ACTION-TAKEN-VERIFICATION-DOWNGRADED]
+      :group-by [:group_name]
+      :order-by [[[:count :*] :desc]]
+      :limit limit}))
+
+(defn generate-security-report
+  "Generate a comprehensive security report with all statistics."
+  [db]
+  (let [stats (get-security-statistics db)
+        trend (get-compromise-trend db 30)
+        distribution (get-verification-status-distribution db)
+        impacted-groups (get-most-impacted-groups db 10)]
+    {:generated-at (db/get-time)
+     :statistics stats
+     :compromise-trend-30d trend
+     :verification-distribution (into {} (map (juxt :verification_status :count) distribution))
+     :most-impacted-groups impacted-groups}))
