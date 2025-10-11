@@ -184,7 +184,7 @@ verify-dependencies:
    - Format: `https://gitlab.com/<group>/<project>/-/pipelines/<pipeline_id>`
    - This can be stored in the `attestation_url` field
 
-#### Grandfathering Strategy for GitLab
+#### Legacy Provenance Strategy for GitLab
 
 For existing GitLab projects, Clojars can:
 
@@ -260,7 +260,7 @@ pipeline {
    - **Git Plugin**: For tracking commit provenance
    - **Artifact Promotion Plugin**: For controlled releases
 
-#### Grandfathering Strategy for Jenkins
+#### Legacy Provenance Strategy for Jenkins
 
 For Jenkins builds:
 
@@ -358,7 +358,7 @@ workflows:
 
 2. **Artifacts API**: CircleCI provides an API to download build artifacts with checksums
 
-#### Grandfathering Strategy for CircleCI
+#### Legacy Provenance Strategy for CircleCI
 
 For CircleCI builds:
 
@@ -381,7 +381,7 @@ Most modern CI/CD platforms support similar patterns:
 3. **Provenance JSON**: Generate a standardized JSON file with build metadata
 4. **Tag-based Builds**: Trigger builds on Git tags that match version numbers
 
-#### Universal Grandfathering Strategy
+#### Universal Legacy Provenance Strategy
 
 For any CI/CD platform, Clojars can accept attestation through:
 
@@ -447,7 +447,7 @@ Clojars could provide a standalone script that generates verifiable provenance l
    - Use the free tier of GitHub Actions
    - Get full attestation support with zero infrastructure
 
-#### Grandfathering for Historical Artifacts
+#### Legacy Provenance for Historical Artifacts
 
 For older JARs deployed before attestation systems existed:
 
@@ -461,8 +461,8 @@ For older JARs deployed before attestation systems existed:
    - Clojars staff manually reviews and approves
    - Mark as `manual-verified`
 
-3. **Grandfather Clause**:
-   - All JARs deployed before [attestation-required-date] are marked `unverified-grandfathered`
+3. **Legacy Provenance Clause**:
+   - All JARs deployed before [attestation-required-date] are marked `unverified-legacy-provenance`
    - No penalty for being unverified
    - Encouragement to add verification for new versions
 
@@ -577,12 +577,12 @@ Different verification methods provide different levels of trust:
 | `source-match-approx` | Medium | Source matches except metadata |
 | `partial-has-build-artifacts` | Low-Medium | Source matches but has .class files |
 | `manual-verified` | Low-Medium | Manual review by Clojars team |
-| `unverified-grandfathered` | Low | Pre-dates verification system |
+| `unverified-legacy-provenance` | Low | Pre-dates verification system |
 | `unverified` | Lowest | No verification attempted |
 
 ### Per-Project Verification Requirements
 
-Clojars implements a per-project minimum verification level system that balances security with user experience. Each project has a **minimum required verification method** for new deployments, which is determined automatically through grandfathering analysis or can be configured by maintainers.
+Clojars implements a per-project minimum verification level system that balances security with user experience. Each project has a **minimum required verification method** for new deployments, which is determined automatically through legacy provenance analysis or can be configured by maintainers.
 
 #### Automatic Minimum Verification Level
 
@@ -597,9 +597,9 @@ When a new artifact is deployed, Clojars determines the minimum verification lev
    - Analyze recent versions (last 5 versions or versions from last 2 years)
    - Determine the project's pattern based on actual artifact contents
    - Set minimum level to match historical practice
-   - Mark as `grandfathered: true` to allow future manual adjustment
+   - Mark as `legacy-provenance: true` to allow future manual adjustment
 
-#### Grandfathering Analysis Logic
+#### Legacy Provenance Analysis Logic
 
 The system analyzes historical artifacts to determine their verification capabilities:
 
@@ -636,8 +636,8 @@ The system analyzes historical artifacts to determine their verification capabil
 
 **Unable to Determine**: Repository info missing or inaccessible
 - **Pattern**: No SCM info in POM, private repository, or repository no longer exists
-- **Minimum Level**: `unverified-grandfathered`
-- **Rationale**: Cannot perform source verification; grandfather existing pattern
+- **Minimum Level**: `unverified-legacy-provenance`
+- **Rationale**: Cannot perform source verification; legacy provenance existing pattern
 - **User Impact**: Should add repository info to POM for future versions
 
 #### Verification Requirement Enforcement
@@ -689,8 +689,8 @@ Project maintainers can configure verification requirements through the Clojars 
 
 **Group Settings Page**: `/groups/:group-name`
 - **Minimum Verification Level**: Dropdown to select required level
-- **Grandfathered**: Checkbox showing if current setting is from automatic analysis
-- **Last Analyzed**: Timestamp of last grandfathering analysis
+- **Legacy Provenance**: Checkbox showing if current setting is from automatic analysis
+- **Last Analyzed**: Timestamp of last legacy provenance analysis
 - **Re-analyze**: Button to re-run analysis on historical artifacts
 
 **Available Override Options**:
@@ -713,16 +713,16 @@ To support per-project verification requirements, extend the `group_settings` ta
 ```sql
 ALTER TABLE group_settings 
   ADD COLUMN minimum_verification_method text DEFAULT NULL,
-  ADD COLUMN verification_grandfathered bool DEFAULT false,
+  ADD COLUMN verification_legacy-provenance bool DEFAULT false,
   ADD COLUMN verification_last_analyzed timestamp DEFAULT NULL;
 ```
 
 **Fields**:
 - `minimum_verification_method`: Required verification method (null = use automatic)
-- `verification_grandfathered`: Whether current setting is from automatic analysis
-- `verification_last_analyzed`: When grandfathering analysis last ran
+- `verification_legacy-provenance`: Whether current setting is from automatic analysis
+- `verification_last_analyzed`: When legacy provenance analysis last ran
 
-#### Grandfathering Analysis Algorithm
+#### Legacy Provenance Analysis Algorithm
 
 **Step 1: Collect Recent Artifacts**
 ```clojure
@@ -767,7 +767,7 @@ ALTER TABLE group_settings
     db 
     group-name
     {:minimum_verification_method (name pattern)
-     :verification_grandfathered true
+     :verification_legacy-provenance true
      :verification_last_analyzed (now)}))
 ```
 
@@ -785,7 +785,7 @@ ALTER TABLE group_settings
 
 **3. Projects with Missing Repository Info**
 - Cannot perform source-match analysis
-- **Resolution**: Set to `attestation` if has attestation, else `unverified-grandfathered`
+- **Resolution**: Set to `attestation` if has attestation, else `unverified-legacy-provenance`
 - **Notify**: Encourage adding SCM info to POM
 
 **4. Projects That Temporarily Had Build Issues**
@@ -801,7 +801,7 @@ ALTER TABLE group_settings
 #### Migration Plan for Existing Projects
 
 **Phase 1: Analysis Period (3 months)**
-- Run grandfathering analysis on all existing projects
+- Run legacy provenance analysis on all existing projects
 - Store results but don't enforce
 - Show "preview" on group settings page
 - Email maintainers with analysis results

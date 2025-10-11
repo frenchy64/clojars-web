@@ -1,8 +1,8 @@
-(ns clojars.unit.verification-grandfathering-test
+(ns clojars.unit.verification-legacy-provenance-test
   (:require
    [clojars.test-helper :as help]
    [clojars.verification-db :as vdb]
-   [clojars.verification-grandfathering :as vgf]
+   [clojars.verification-legacy-provenance :as vgf]
    [clojure.test :refer [deftest is testing use-fixtures]]))
 
 (use-fixtures :each
@@ -56,7 +56,7 @@
       (let [settings (vdb/get-verification-settings db "com.example")]
         (is (= vdb/VERIFICATION-METHOD-SOURCE-MATCH
                (:minimum_verification_method settings)))
-        (is (true? (:verification_grandfathered settings)))
+        (is (true? (:verification_legacy-provenance settings)))
         (is (some? (:verification_last_analyzed settings))))
       
       ;; Update to different method
@@ -66,8 +66,8 @@
       (is (= vdb/VERIFICATION-METHOD-SOURCE-MATCH-APPROX
              (vdb/get-minimum-verification-method db "com.example")))
       
-      ;; Should no longer be grandfathered
-      (is (false? (:verification_grandfathered 
+      ;; Should no longer be legacy-provenance
+      (is (false? (:verification_legacy-provenance 
                    (vdb/get-verification-settings db "com.example")))))))
 
 (deftest test-new-project-defaults
@@ -79,13 +79,13 @@
       ;; Get requirement for new project
       (let [req (vgf/get-verification-requirement db "com.newproject" "my-jar")]
         (is (= vdb/VERIFICATION-METHOD-SOURCE-MATCH (:required-method req)))
-        (is (false? (:is-grandfathered? req)))
+        (is (false? (:is-legacy-provenance? req)))
         (is (true? (:is-new-project? req)))))))
 
-(deftest test-existing-project-grandfathering
-  (testing "Existing projects use grandfathered settings"
+(deftest test-existing-project-legacy-provenance
+  (testing "Existing projects use legacy-provenance settings"
     (let [db (help/db)]
-      ;; Simulate an existing project with grandfathered settings
+      ;; Simulate an existing project with legacy-provenance settings
       (vdb/set-minimum-verification-method 
        db "com.oldproject" vdb/VERIFICATION-METHOD-PARTIAL-HAS-BUILD-ARTIFACTS true)
       
@@ -96,7 +96,7 @@
       (let [req (vgf/get-verification-requirement db "com.oldproject" "old-jar")]
         (is (= vdb/VERIFICATION-METHOD-PARTIAL-HAS-BUILD-ARTIFACTS 
                (:required-method req)))
-        (is (true? (:is-grandfathered? req)))
+        (is (true? (:is-legacy-provenance? req)))
         (is (false? (:is-new-project? req)))))))
 
 (deftest test-check-deployment-meets-requirements
@@ -190,15 +190,15 @@
          :verification-notes nil})
       
       ;; Analyze the project
-      (let [analysis (vgf/analyze-project-for-grandfathering 
+      (let [analysis (vgf/analyze-project-for-legacy-provenance 
                      db "com.example" "my-lib")]
         (is (= :source-match (:pattern analysis)))
         (is (= vdb/VERIFICATION-METHOD-SOURCE-MATCH (:minimum-method analysis)))
         (is (= 3 (:verified-count analysis)))
         (is (true? (:has-sufficient-data? analysis)))))))
 
-(deftest test-apply-grandfathering
-  (testing "Applying grandfathering sets minimum verification method"
+(deftest test-apply-legacy-provenance
+  (testing "Applying legacy-provenance sets minimum verification method"
     (let [db (help/db)]
       ;; Create a group and add some users
       (help/add-group db "testuser" "com.example")
@@ -223,15 +223,15 @@
          :reproducibility-script-url nil
          :verification-notes nil})
       
-      ;; Apply grandfathering
-      (let [analysis (vgf/apply-grandfathering db "com.example" "my-lib")]
+      ;; Apply legacy-provenance
+      (let [analysis (vgf/apply-legacy-provenance db "com.example" "my-lib")]
         ;; Should have analyzed and set the minimum method
         (is (some? (:pattern analysis)))
         
         ;; Check that settings were updated
         (let [settings (vdb/get-verification-settings db "com.example")]
           (is (some? (:minimum_verification_method settings)))
-          (is (true? (:verification_grandfathered settings)))
+          (is (true? (:verification_legacy-provenance settings)))
           (is (some? (:verification_last_analyzed settings))))))))
 
 (deftest test-find-recent-versions

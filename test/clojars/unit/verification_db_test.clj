@@ -206,7 +206,7 @@
                                verification-db/VERIFICATION-STATUS-PARTIAL]
                               [verification-db/VERIFICATION-METHOD-MANUAL-VERIFIED
                                verification-db/VERIFICATION-STATUS-VERIFIED]
-                              [verification-db/VERIFICATION-METHOD-UNVERIFIED-GRANDFATHERED
+                              [verification-db/VERIFICATION-METHOD-UNVERIFIED-LEGACY-PROVENANCE
                                verification-db/VERIFICATION-STATUS-UNVERIFIED]]]
       (verification-db/add-jar-verification
        help/*db*
@@ -271,7 +271,7 @@
     (let [settings (verification-db/get-verification-settings help/*db* "com.example")]
       (is (= verification-db/VERIFICATION-METHOD-SOURCE-MATCH
              (:minimum_verification_method settings)))
-      (is (true? (:verification_grandfathered settings)))
+      (is (true? (:verification_legacy_provenance settings)))
       (is (some? (:verification_last_analyzed settings))))
     
     ;; Update settings
@@ -284,7 +284,7 @@
     (let [settings (verification-db/get-verification-settings help/*db* "com.example")]
       (is (= verification-db/VERIFICATION-METHOD-SOURCE-MATCH-APPROX
              (:minimum_verification_method settings)))
-      (is (false? (:verification_grandfathered settings))))))
+      (is (false? (:verification_legacy_provenance settings))))))
 
 (deftest test-find-recent-versions
   (testing "Can find recent versions for a jar"

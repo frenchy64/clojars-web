@@ -1,7 +1,7 @@
-(ns clojars.verification-grandfathering
+(ns clojars.verification-legacy-provenance
   "Logic for analyzing historical artifacts and determining minimum verification levels.
   
-  This namespace implements the grandfathering analysis that examines a project's
+  This namespace implements the legacy provenance analysis that examines a project's
   historical deployments to determine appropriate verification requirements going forward."
   (:require
    [clojars.verification-db :as vdb]
@@ -14,7 +14,7 @@
 (def PATTERN-SOURCE-MATCH-APPROX :source-match-approx)
 (def PATTERN-PARTIAL-BUILD-ARTIFACTS :partial-has-build-artifacts)
 (def PATTERN-ATTESTATION-REQUIRED :attestation-required)
-(def PATTERN-UNVERIFIED :unverified-grandfathered)
+(def PATTERN-UNVERIFIED :unverified-legacy-provenance)
 
 (defn- analyze-artifact-contents
   "Analyze the contents of a single artifact.
@@ -85,7 +85,7 @@
         :else
         PATTERN-UNVERIFIED))))
 
-(defn analyze-project-for-grandfathering
+(defn analyze-project-for-legacy-provenance
   "Analyze recent versions of a project to determine appropriate verification level.
   
   Parameters:
@@ -156,7 +156,7 @@
                         :source-match-approx vdb/VERIFICATION-METHOD-SOURCE-MATCH-APPROX
                         :partial-has-build-artifacts vdb/VERIFICATION-METHOD-PARTIAL-HAS-BUILD-ARTIFACTS
                         :attestation-required vdb/VERIFICATION-METHOD-ATTESTATION
-                        :unverified-grandfathered vdb/VERIFICATION-METHOD-UNVERIFIED-GRANDFATHERED)
+                        :unverified-legacy-provenance vdb/VERIFICATION-METHOD-UNVERIFIED-LEGACY-PROVENANCE)
         
         ;; Generate recommendation text
         recommendation (case pattern
@@ -172,8 +172,8 @@
                         :attestation-required
                         "Project cannot be verified from source. Build attestation is required."
                         
-                        :unverified-grandfathered
-                        "Insufficient data to determine verification pattern. Grandfathered as unverified.")]
+                        :unverified-legacy-provenance
+                        "Insufficient data to determine verification pattern. Legacy provenance as unverified.")]
     
     {:pattern pattern
      :minimum-method minimum-method
@@ -183,8 +183,8 @@
      :verified-count verified-count
      :has-sufficient-data? has-sufficient-data?}))
 
-(defn apply-grandfathering
-  "Apply grandfathering analysis to a project and set minimum verification level.
+(defn apply-legacy-provenance
+  "Apply legacy provenance analysis to a project and set minimum verification level.
   
   Parameters:
   - db: database connection
@@ -196,13 +196,13 @@
   
   Returns the analysis result."
   [db group-name jar-name]
-  (let [analysis (analyze-project-for-grandfathering db group-name jar-name)]
+  (let [analysis (analyze-project-for-legacy-provenance db group-name jar-name)]
     ;; Set the minimum verification method for the group
     (vdb/set-minimum-verification-method 
      db 
      group-name 
      (:minimum-method analysis)
-     true) ; Mark as grandfathered
+     true) ; Mark as legacy-provenance
     
     ;; Return the analysis for logging/reporting
     analysis))
@@ -212,7 +212,7 @@
   
   New projects are those with:
   - No previous deployments, OR
-  - First deployment after grandfathering system is enabled
+  - First deployment after legacy provenance system is enabled
   
   Returns true if new project defaults should apply."
   [db group-name _jar-name]
@@ -231,7 +231,7 @@
   
   Returns a map with:
   - :required-method - the minimum verification method required
-  - :is-grandfathered? - whether this is from grandfathering
+  - :is-legacy-provenance? - whether this is from legacy provenance
   - :is-new-project? - whether this is considered a new project"
   [db group-name jar-name]
   (let [settings (vdb/get-verification-settings db group-name)
@@ -240,13 +240,13 @@
     (if is-new-project?
       ;; New project - use strict defaults
       {:required-method vdb/VERIFICATION-METHOD-SOURCE-MATCH
-       :is-grandfathered? false
+       :is-legacy-provenance? false
        :is-new-project? true}
       
-      ;; Existing project - use configured or grandfathered settings
+      ;; Existing project - use configured or legacy-provenance settings
       {:required-method (or (:minimum_verification_method settings)
-                           vdb/VERIFICATION-METHOD-UNVERIFIED-GRANDFATHERED)
-       :is-grandfathered? (:verification_grandfathered settings false)
+                           vdb/VERIFICATION-METHOD-UNVERIFIED-LEGACY-PROVENANCE)
+       :is-legacy-provenance? (:verification_legacy-provenance settings false)
        :is-new-project? false})))
 
 (defn check-deployment-meets-requirements
@@ -273,7 +273,7 @@
      :required-method required-method
      :actual-method actual-method
      :is-new-project? (:is-new-project? requirement)
-     :is-grandfathered? (:is-grandfathered? requirement)
+     :is-legacy-provenance? (:is-legacy-provenance? requirement)
      :reason (when-not meets-requirement?
                (format "Deployment requires verification method '%s' or higher, but only '%s' was provided"
                       required-method

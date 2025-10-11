@@ -167,7 +167,7 @@
   (db/do-commands tx
                   [(str "alter table group_settings "
                         "add column minimum_verification_method text default null, "
-                        "add column verification_grandfathered bool default false, "
+                        "add column verification_legacy_provenance bool default false, "
                         "add column verification_last_analyzed timestamp default null")]))
 
 (def migrations

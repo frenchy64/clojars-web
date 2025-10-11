@@ -37,7 +37,7 @@
 (def VERIFICATION-METHOD-MANUAL "manual")
 (def VERIFICATION-METHOD-MANUAL-VERIFIED "manual-verified")
 (def VERIFICATION-METHOD-VERIFIED-RETROSPECTIVE "verified-retrospective")
-(def VERIFICATION-METHOD-UNVERIFIED-GRANDFATHERED "unverified-grandfathered")
+(def VERIFICATION-METHOD-UNVERIFIED-LEGACY-PROVENANCE "unverified-legacy-provenance")
 
 (defn add-jar-verification
   "Record verification status for a jar version.
@@ -199,16 +199,16 @@
 
 (defn set-minimum-verification-method
   "Set the minimum required verification method for a group.
-   Also updates grandfathering status and analysis timestamp."
-  [db group-name minimum-method grandfathered?]
+   Also updates legacy provenance status and analysis timestamp."
+  [db group-name minimum-method legacy-provenance?]
   (sql/insert! db :group_settings
                {:group_name group-name
                 :minimum_verification_method minimum-method
-                :verification_grandfathered grandfathered?
+                :verification_legacy_provenance legacy-provenance?
                 :verification_last_analyzed (db/get-time)}
                {:on-conflict [:group_name]
                 :do-update-set [:minimum_verification_method
-                                :verification_grandfathered
+                                :verification_legacy_provenance
                                 :verification_last_analyzed]}))
 
 (defn get-verification-settings
@@ -216,7 +216,7 @@
   [db group-name]
   (-> (q db
          {:select [:minimum_verification_method
-                   :verification_grandfathered
+                   :verification_legacy_provenance
                    :verification_last_analyzed]
           :from :group_settings
           :where [:= :group_name group-name]
@@ -240,14 +240,14 @@
                    VERIFICATION-METHOD-MANUAL-VERIFIED 35
                    VERIFICATION-METHOD-VERIFIED-RETROSPECTIVE 35
                    VERIFICATION-METHOD-MANUAL 30
-                   VERIFICATION-METHOD-UNVERIFIED-GRANDFATHERED 10
+                   VERIFICATION-METHOD-UNVERIFIED-LEGACY-PROVENANCE 10
                    "unverified" 0}
         actual-level (get hierarchy actual-method 0)
         required-level (get hierarchy required-method 0)]
     (>= actual-level required-level)))
 
 (defn find-recent-versions
-  "Find recent versions of a jar for grandfathering analysis.
+  "Find recent versions of a jar for legacy provenance analysis.
    Returns up to `limit` most recent versions."
   [db group-name jar-name limit]
   (q db
