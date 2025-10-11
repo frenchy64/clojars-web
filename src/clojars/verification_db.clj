@@ -26,8 +26,18 @@
 
 ;; Verification methods
 (def VERIFICATION-METHOD-SOURCE-MATCH "source-match")
+(def VERIFICATION-METHOD-SOURCE-MATCH-APPROX "source-match-approx")
+(def VERIFICATION-METHOD-ATTESTATION-GITHUB-TRUSTED "attestation-github-trusted")
+(def VERIFICATION-METHOD-ATTESTATION-GITLAB-SLSA "attestation-gitlab-slsa")
+(def VERIFICATION-METHOD-ATTESTATION-JENKINS "attestation-jenkins")
+(def VERIFICATION-METHOD-ATTESTATION-CIRCLECI "attestation-circleci")
+(def VERIFICATION-METHOD-ATTESTATION-OTHER-CI "attestation-other-ci")
 (def VERIFICATION-METHOD-ATTESTATION "attestation")
+(def VERIFICATION-METHOD-PARTIAL-HAS-BUILD-ARTIFACTS "partial-has-build-artifacts")
 (def VERIFICATION-METHOD-MANUAL "manual")
+(def VERIFICATION-METHOD-MANUAL-VERIFIED "manual-verified")
+(def VERIFICATION-METHOD-VERIFIED-RETROSPECTIVE "verified-retrospective")
+(def VERIFICATION-METHOD-UNVERIFIED-LEGACY-PROVENANCE "unverified-legacy-provenance")
 
 (defn add-jar-verification
   "Record verification status for a jar version.
@@ -174,3 +184,77 @@
       :order-by [[:j.created :desc]]
       :limit limit
       :offset offset}))
+
+(defn get-minimum-verification-method
+  "Get the minimum required verification method for a group.
+   Returns the minimum verification method string or nil if not set."
+  [db group-name]
+  (-> (q db
+         {:select [:minimum_verification_method]
+          :from :group_settings
+          :where [:= :group_name group-name]
+          :limit 1})
+      first
+      :minimum_verification_method))
+
+(defn set-minimum-verification-method
+  "Set the minimum required verification method for a group.
+   Also updates legacy provenance status and analysis timestamp."
+  [db group-name minimum-method legacy-provenance?]
+  (sql/insert! db :group_settings
+               {:group_name group-name
+                :minimum_verification_method minimum-method
+                :verification_legacy_provenance legacy-provenance?
+                :verification_last_analyzed (db/get-time)}
+               {:on-conflict [:group_name]
+                :do-update-set [:minimum_verification_method
+                                :verification_legacy_provenance
+                                :verification_last_analyzed]}))
+
+(defn get-verification-settings
+  "Get all verification-related settings for a group."
+  [db group-name]
+  (-> (q db
+         {:select [:minimum_verification_method
+                   :verification_legacy_provenance
+                   :verification_last_analyzed]
+          :from :group_settings
+          :where [:= :group_name group-name]
+          :limit 1})
+      first))
+
+(defn verification-method-meets-requirement?
+  "Check if an actual verification method meets a minimum requirement.
+   Returns true if actual-method meets or exceeds required-method."
+  [actual-method required-method]
+  (let [;; Define hierarchy from highest to lowest trust
+        hierarchy {VERIFICATION-METHOD-ATTESTATION-GITHUB-TRUSTED 100
+                   VERIFICATION-METHOD-ATTESTATION-GITLAB-SLSA 90
+                   VERIFICATION-METHOD-SOURCE-MATCH 85
+                   VERIFICATION-METHOD-ATTESTATION-CIRCLECI 75
+                   VERIFICATION-METHOD-ATTESTATION-JENKINS 70
+                   VERIFICATION-METHOD-ATTESTATION-OTHER-CI 65
+                   VERIFICATION-METHOD-SOURCE-MATCH-APPROX 60
+                   VERIFICATION-METHOD-ATTESTATION 60
+                   VERIFICATION-METHOD-PARTIAL-HAS-BUILD-ARTIFACTS 40
+                   VERIFICATION-METHOD-MANUAL-VERIFIED 35
+                   VERIFICATION-METHOD-VERIFIED-RETROSPECTIVE 35
+                   VERIFICATION-METHOD-MANUAL 30
+                   VERIFICATION-METHOD-UNVERIFIED-LEGACY-PROVENANCE 10
+                   "unverified" 0}
+        actual-level (get hierarchy actual-method 0)
+        required-level (get hierarchy required-method 0)]
+    (>= actual-level required-level)))
+
+(defn find-recent-versions
+  "Find recent versions of a jar for legacy provenance analysis.
+   Returns up to `limit` most recent versions."
+  [db group-name jar-name limit]
+  (q db
+     {:select [:version :created]
+      :from :jars
+      :where [:and
+              [:= :group_name group-name]
+              [:= :jar_name jar-name]]
+      :order-by [[:created :desc]]
+      :limit limit}))

@@ -186,3 +186,132 @@
       ;; Should find test-jar v1.0.0 but not verified-jar v1.0.0
       (is (= 1 (count unverified)))
       (is (= "test-jar" (:jar_name (first unverified)))))))
+
+(deftest test-new-verification-methods
+  (testing "Can use new verification method constants"
+    (add-test-jar help/*db*)
+    
+    ;; Test all new verification methods
+    (doseq [[method status] [[verification-db/VERIFICATION-METHOD-SOURCE-MATCH-APPROX
+                               verification-db/VERIFICATION-STATUS-VERIFIED]
+                              [verification-db/VERIFICATION-METHOD-ATTESTATION-GITHUB-TRUSTED
+                               verification-db/VERIFICATION-STATUS-VERIFIED]
+                              [verification-db/VERIFICATION-METHOD-ATTESTATION-GITLAB-SLSA
+                               verification-db/VERIFICATION-STATUS-VERIFIED]
+                              [verification-db/VERIFICATION-METHOD-ATTESTATION-JENKINS
+                               verification-db/VERIFICATION-STATUS-VERIFIED]
+                              [verification-db/VERIFICATION-METHOD-ATTESTATION-CIRCLECI
+                               verification-db/VERIFICATION-STATUS-VERIFIED]
+                              [verification-db/VERIFICATION-METHOD-PARTIAL-HAS-BUILD-ARTIFACTS
+                               verification-db/VERIFICATION-STATUS-PARTIAL]
+                              [verification-db/VERIFICATION-METHOD-MANUAL-VERIFIED
+                               verification-db/VERIFICATION-STATUS-VERIFIED]
+                              [verification-db/VERIFICATION-METHOD-UNVERIFIED-LEGACY-PROVENANCE
+                               verification-db/VERIFICATION-STATUS-UNVERIFIED]]]
+      (verification-db/add-jar-verification
+       help/*db*
+       {:group-name "org.clojars.testuser"
+        :jar-name "test-jar"
+        :version (str "1.0.0-" (name method))
+        :verification-status status
+        :verification-method method
+        :repo-url "https://github.com/testuser/test-jar"})
+      
+      (let [verification (verification-db/find-jar-verification
+                          help/*db*
+                          "org.clojars.testuser"
+                          "test-jar"
+                          (str "1.0.0-" (name method)))]
+        (is (some? verification))
+        (is (= method (:verification_method verification)))
+        (is (= status (:verification_status verification)))))))
+
+(deftest test-verification-method-hierarchy
+  (testing "Verification method hierarchy works correctly"
+    ;; Same level
+    (is (verification-db/verification-method-meets-requirement?
+         verification-db/VERIFICATION-METHOD-SOURCE-MATCH
+         verification-db/VERIFICATION-METHOD-SOURCE-MATCH))
+    
+    ;; Higher trust meets lower requirement
+    (is (verification-db/verification-method-meets-requirement?
+         verification-db/VERIFICATION-METHOD-ATTESTATION-GITHUB-TRUSTED
+         verification-db/VERIFICATION-METHOD-SOURCE-MATCH))
+    
+    (is (verification-db/verification-method-meets-requirement?
+         verification-db/VERIFICATION-METHOD-SOURCE-MATCH
+         verification-db/VERIFICATION-METHOD-SOURCE-MATCH-APPROX))
+    
+    ;; Lower trust doesn't meet higher requirement
+    (is (not (verification-db/verification-method-meets-requirement?
+              verification-db/VERIFICATION-METHOD-SOURCE-MATCH-APPROX
+              verification-db/VERIFICATION-METHOD-SOURCE-MATCH)))
+    
+    (is (not (verification-db/verification-method-meets-requirement?
+              verification-db/VERIFICATION-METHOD-PARTIAL-HAS-BUILD-ARTIFACTS
+              verification-db/VERIFICATION-METHOD-ATTESTATION-GITHUB-TRUSTED)))))
+
+(deftest test-group-verification-settings
+  (testing "Can set and retrieve group verification settings"
+    ;; Initially no settings
+    (is (nil? (verification-db/get-minimum-verification-method help/*db* "com.example")))
+    
+    ;; Set minimum verification method
+    (verification-db/set-minimum-verification-method
+     help/*db*
+     "com.example"
+     verification-db/VERIFICATION-METHOD-SOURCE-MATCH
+     true)
+    
+    ;; Retrieve it
+    (is (= verification-db/VERIFICATION-METHOD-SOURCE-MATCH
+           (verification-db/get-minimum-verification-method help/*db* "com.example")))
+    
+    ;; Get full settings
+    (let [settings (verification-db/get-verification-settings help/*db* "com.example")]
+      (is (= verification-db/VERIFICATION-METHOD-SOURCE-MATCH
+             (:minimum_verification_method settings)))
+      (is (true? (:verification_legacy_provenance settings)))
+      (is (some? (:verification_last_analyzed settings))))
+    
+    ;; Update settings
+    (verification-db/set-minimum-verification-method
+     help/*db*
+     "com.example"
+     verification-db/VERIFICATION-METHOD-SOURCE-MATCH-APPROX
+     false)
+    
+    (let [settings (verification-db/get-verification-settings help/*db* "com.example")]
+      (is (= verification-db/VERIFICATION-METHOD-SOURCE-MATCH-APPROX
+             (:minimum_verification_method settings)))
+      (is (false? (:verification_legacy_provenance settings))))))
+
+(deftest test-find-recent-versions
+  (testing "Can find recent versions for a jar"
+    (add-test-jar help/*db*)
+    (db/add-jar help/*db* "testuser"
+                {:group "org.clojars.testuser"
+                 :name "test-jar"
+                 :version "1.1.0"
+                 :description "A test jar"
+                 :authors ["Test User"]
+                 :packaging :jar
+                 :dependencies []})
+    (db/add-jar help/*db* "testuser"
+                {:group "org.clojars.testuser"
+                 :name "test-jar"
+                 :version "1.2.0"
+                 :description "A test jar"
+                 :authors ["Test User"]
+                 :packaging :jar
+                 :dependencies []})
+    
+    (let [versions (verification-db/find-recent-versions
+                    help/*db*
+                    "org.clojars.testuser"
+                    "test-jar"
+                    5)]
+      (is (= 3 (count versions)))
+      ;; Should be in descending order
+      (is (= "1.2.0" (:version (first versions)))))))
+
