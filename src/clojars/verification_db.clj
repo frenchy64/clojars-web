@@ -39,12 +39,37 @@
 (def VERIFICATION-METHOD-VERIFIED-RETROSPECTIVE "verified-retrospective")
 (def VERIFICATION-METHOD-UNVERIFIED-LEGACY-PROVENANCE "unverified-legacy-provenance")
 
+;; Change reasons - reasons for verification status changes
+(def CHANGE-REASON-INITIAL-VERIFICATION "initial_verification")
+(def CHANGE-REASON-REVERIFICATION "reverification")
+(def CHANGE-REASON-COMPROMISED-WORKFLOW "compromised_workflow")
+(def CHANGE-REASON-HIJACKED-REPO "hijacked_repo")
+(def CHANGE-REASON-MALICIOUS-NON-MAIN-BRANCH "malicious_non_main_branch")
+(def CHANGE-REASON-BACKDOOR-DETECTED "backdoor_detected")
+(def CHANGE-REASON-SECURITY-VULNERABILITY "security_vulnerability")
+(def CHANGE-REASON-BUILD-SYSTEM-UPDATE "build_system_update")
+(def CHANGE-REASON-POLICY-CHANGE "policy_change")
+(def CHANGE-REASON-MANUAL-REVIEW "manual_review")
+(def CHANGE-REASON-AUTOMATED-SCAN "automated_scan")
+
+;; Actions taken - what action was performed in response
+(def ACTION-TAKEN-NONE "none")
+(def ACTION-TAKEN-JAR-DELETED "jar_deleted")
+(def ACTION-TAKEN-CVE-REPORTED "cve_reported")
+(def ACTION-TAKEN-USER-NOTIFIED "user_notified")
+(def ACTION-TAKEN-GROUP-SUSPENDED "group_suspended")
+(def ACTION-TAKEN-VERIFICATION-DOWNGRADED "verification_downgraded")
+(def ACTION-TAKEN-VERIFICATION-UPGRADED "verification_upgraded")
+(def ACTION-TAKEN-UNDER-INVESTIGATION "under_investigation")
+
 (defn add-jar-verification
   "Record verification status for a jar version.
-   Uses UPSERT to handle cases where a verification record already exists."
+   Uses UPSERT to handle cases where a verification record already exists.
+   When updating, also records the change in the history table."
   [db {:keys [group-name jar-name version verification-status
               verification-method repo-url commit-sha commit-tag
-              attestation-url reproducibility-script-url verification-notes]}]
+              attestation-url reproducibility-script-url verification-notes
+              change-reason action-taken changed-by]}]
   (let [record {:group_name group-name
                 :jar_name jar-name
                 :version version
@@ -56,7 +81,12 @@
                 :attestation_url attestation-url
                 :reproducibility_script_url reproducibility-script-url
                 :verification_notes verification-notes
-                :verified_at (db/get-time)}]
+                :verified_at (db/get-time)}
+        history-record (assoc record
+                              :change_reason (or change-reason CHANGE-REASON-INITIAL-VERIFICATION)
+                              :action_taken (or action-taken ACTION-TAKEN-NONE)
+                              :changed_by changed-by
+                              :changed_at (db/get-time))]
     ;; Use raw SQL for UPSERT since next.jdbc doesn't have direct support
     (sql/query db
                [(str "INSERT INTO jar_verifications "
@@ -78,7 +108,9 @@
                 group-name jar-name version verification-status
                 verification-method repo-url commit-sha commit-tag
                 attestation-url reproducibility-script-url verification-notes
-                (:verified_at record)])))
+                (:verified_at record)])
+    ;; Always record in history
+    (add-jar-verification-history db history-record)))
 
 (defn update-jar-verification
   "Update verification status for a jar version."
@@ -258,3 +290,100 @@
               [:= :jar_name jar-name]]
       :order-by [[:created :desc]]
       :limit limit}))
+
+(defn add-jar-verification-history
+  "Record a verification change in the history table.
+   This provides a complete audit trail of verification status changes."
+  [db {:keys [group-name jar-name version verification-status
+              verification-method repo-url commit-sha commit-tag
+              attestation-url reproducibility-script-url verification-notes
+              change-reason action-taken changed-by changed-at]}]
+  (sql/insert! db :jar_verification_history
+               {:group_name group-name
+                :jar_name jar-name
+                :version version
+                :verification_status verification-status
+                :verification_method verification-method
+                :repo_url repo-url
+                :commit_sha commit-sha
+                :commit_tag commit-tag
+                :attestation_url attestation-url
+                :reproducibility_script_url reproducibility-script-url
+                :verification_notes verification-notes
+                :change_reason change-reason
+                :action_taken action-taken
+                :changed_by changed-by
+                :changed_at (or changed-at (db/get-time))}))
+
+(defn find-jar-verification-history
+  "Find all verification history records for a specific jar version.
+   Returns records in reverse chronological order (newest first)."
+  [db group-name jar-name version]
+  (q db
+     {:select :*
+      :from :jar_verification_history
+      :where [:and
+              [:= :group_name group-name]
+              [:= :jar_name jar-name]
+              [:= :version version]]
+      :order-by [[:changed_at :desc]]}))
+
+(defn find-jar-verification-history-all-versions
+  "Find all verification history records for all versions of a jar.
+   Returns records in reverse chronological order (newest first)."
+  [db group-name jar-name]
+  (q db
+     {:select :*
+      :from :jar_verification_history
+      :where [:and
+              [:= :group_name group-name]
+              [:= :jar_name jar-name]]
+      :order-by [[:changed_at :desc]]}))
+
+(defn find-verification-changes-by-reason
+  "Find all verification changes with a specific reason.
+   Useful for tracking security issues or policy changes."
+  [db change-reason limit]
+  (q db
+     {:select :*
+      :from :jar_verification_history
+      :where [:= :change_reason change-reason]
+      :order-by [[:changed_at :desc]]
+      :limit limit}))
+
+(defn find-verification-changes-by-action
+  "Find all verification changes where a specific action was taken.
+   Useful for tracking what actions were performed."
+  [db action-taken limit]
+  (q db
+     {:select :*
+      :from :jar_verification_history
+      :where [:= :action_taken action-taken]
+      :order-by [[:changed_at :desc]]
+      :limit limit}))
+
+(defn update-jar-verification-with-history
+  "Update verification status for a jar version and record the change in history.
+   This is the preferred way to update verification status to ensure audit trail."
+  [db group-name jar-name version updates change-reason action-taken changed-by]
+  (let [current (find-jar-verification db group-name jar-name version)
+        merged-updates (merge current updates)
+        history-record (assoc merged-updates
+                              :group-name group-name
+                              :jar-name jar-name
+                              :version version
+                              :change-reason change-reason
+                              :action-taken action-taken
+                              :changed-by changed-by)]
+    ;; Update current state
+    (sql/update! db :jar_verifications
+                 (select-keys updates
+                              [:verification_status :verification_method
+                               :repo_url :commit_sha :commit_tag
+                               :attestation_url :reproducibility_script_url
+                               :verification_notes])
+                 {:group_name group-name
+                  :jar_name jar-name
+                  :version version})
+    ;; Record in history
+    (add-jar-verification-history db history-record)))

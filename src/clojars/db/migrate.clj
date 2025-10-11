@@ -170,6 +170,31 @@
                         "add column verification_legacy_provenance bool default false, "
                         "add column verification_last_analyzed timestamp default null")]))
 
+(defn- add-jar-verification-history-table
+  [tx]
+  (db/do-commands tx
+                  [(str "create table jar_verification_history "
+                        "(id serial not null primary key,"
+                        " group_name text not null,"
+                        " jar_name text not null,"
+                        " version text not null,"
+                        " verification_status text not null,"
+                        " verification_method text,"
+                        " repo_url text,"
+                        " commit_sha text,"
+                        " commit_tag text,"
+                        " attestation_url text,"
+                        " reproducibility_script_url text,"
+                        " verification_notes text,"
+                        " change_reason text,"
+                        " action_taken text,"
+                        " changed_by text,"
+                        " changed_at timestamp not null default current_timestamp)")
+                   "create index jar_verification_history_idx0 on jar_verification_history (group_name, jar_name, version)"
+                   "create index jar_verification_history_idx1 on jar_verification_history (changed_at)"
+                   "create index jar_verification_history_idx2 on jar_verification_history (verification_status)"
+                   "create index jar_verification_history_idx3 on jar_verification_history (change_reason)"]))
+
 (def migrations
   [#'initial-schema
    #'add-deploy-tokens-table
@@ -188,7 +213,8 @@
    #'add-scope-to-permissions
    #'add-created-index-to-jars-table
    #'add-jar-verifications-table
-   #'add-verification-settings-to-group-settings])
+   #'add-verification-settings-to-group-settings
+   #'add-jar-verification-history-table])
 
 (defn migrate [db]
   (db/do-commands db

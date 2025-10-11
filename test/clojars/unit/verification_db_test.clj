@@ -315,3 +315,133 @@
       ;; Should be in descending order
       (is (= "1.2.0" (:version (first versions)))))))
 
+(deftest test-verification-history
+  (testing "Can record and retrieve verification history"
+    (add-test-jar help/*db*)
+    
+    ;; Initial verification
+    (verification-db/add-jar-verification
+     help/*db*
+     {:group-name "org.clojars.testuser"
+      :jar-name "test-jar"
+      :version "1.0.0"
+      :verification-status verification-db/VERIFICATION-STATUS-VERIFIED
+      :verification-method verification-db/VERIFICATION-METHOD-SOURCE-MATCH
+      :change-reason verification-db/CHANGE-REASON-INITIAL-VERIFICATION
+      :action-taken verification-db/ACTION-TAKEN-NONE
+      :changed-by "admin"})
+    
+    ;; Simulate a security issue - downgrade verification
+    (verification-db/update-jar-verification-with-history
+     help/*db*
+     "org.clojars.testuser"
+     "test-jar"
+     "1.0.0"
+     {:verification_status verification-db/VERIFICATION-STATUS-FAILED
+      :verification_notes "Compromised build workflow detected"}
+     verification-db/CHANGE-REASON-COMPROMISED-WORKFLOW
+     verification-db/ACTION-TAKEN-USER-NOTIFIED
+     "security-team")
+    
+    ;; Retrieve history
+    (let [history (verification-db/find-jar-verification-history
+                   help/*db*
+                   "org.clojars.testuser"
+                   "test-jar"
+                   "1.0.0")]
+      ;; Should have 2 records: initial verification and security downgrade
+      (is (= 2 (count history)))
+      
+      ;; Most recent should be the security issue
+      (let [recent (first history)]
+        (is (= "failed" (:verification_status recent)))
+        (is (= verification-db/CHANGE-REASON-COMPROMISED-WORKFLOW (:change_reason recent)))
+        (is (= verification-db/ACTION-TAKEN-USER-NOTIFIED (:action_taken recent)))
+        (is (= "security-team" (:changed_by recent))))
+      
+      ;; Older record should be initial verification
+      (let [initial (second history)]
+        (is (= "verified" (:verification_status initial)))
+        (is (= verification-db/CHANGE-REASON-INITIAL-VERIFICATION (:change_reason initial)))
+        (is (= "admin" (:changed_by initial)))))))
+
+(deftest test-change-reason-constants
+  (testing "Change reason constants are properly defined"
+    (is (= "initial_verification" verification-db/CHANGE-REASON-INITIAL-VERIFICATION))
+    (is (= "compromised_workflow" verification-db/CHANGE-REASON-COMPROMISED-WORKFLOW))
+    (is (= "hijacked_repo" verification-db/CHANGE-REASON-HIJACKED-REPO))
+    (is (= "malicious_non_main_branch" verification-db/CHANGE-REASON-MALICIOUS-NON-MAIN-BRANCH))
+    (is (= "backdoor_detected" verification-db/CHANGE-REASON-BACKDOOR-DETECTED))
+    (is (= "security_vulnerability" verification-db/CHANGE-REASON-SECURITY-VULNERABILITY))))
+
+(deftest test-action-taken-constants
+  (testing "Action taken constants are properly defined"
+    (is (= "none" verification-db/ACTION-TAKEN-NONE))
+    (is (= "jar_deleted" verification-db/ACTION-TAKEN-JAR-DELETED))
+    (is (= "cve_reported" verification-db/ACTION-TAKEN-CVE-REPORTED))
+    (is (= "user_notified" verification-db/ACTION-TAKEN-USER-NOTIFIED))
+    (is (= "verification_downgraded" verification-db/ACTION-TAKEN-VERIFICATION-DOWNGRADED))))
+
+(deftest test-find-verification-changes-by-reason
+  (testing "Can find verification changes by reason"
+    (add-test-jar help/*db*)
+    (db/add-jar help/*db* "testuser"
+                {:group "org.clojars.testuser"
+                 :name "another-jar"
+                 :version "1.0.0"
+                 :description "Another test jar"
+                 :authors ["Test User"]
+                 :packaging :jar
+                 :dependencies []})
+    
+    ;; Add verifications with different reasons
+    (verification-db/add-jar-verification
+     help/*db*
+     {:group-name "org.clojars.testuser"
+      :jar-name "test-jar"
+      :version "1.0.0"
+      :verification-status verification-db/VERIFICATION-STATUS-FAILED
+      :change-reason verification-db/CHANGE-REASON-BACKDOOR-DETECTED
+      :action-taken verification-db/ACTION-TAKEN-JAR-DELETED
+      :changed-by "security-team"})
+    
+    (verification-db/add-jar-verification
+     help/*db*
+     {:group-name "org.clojars.testuser"
+      :jar-name "another-jar"
+      :version "1.0.0"
+      :verification-status verification-db/VERIFICATION-STATUS-FAILED
+      :change-reason verification-db/CHANGE-REASON-BACKDOOR-DETECTED
+      :action-taken verification-db/ACTION-TAKEN-CVE-REPORTED
+      :changed-by "security-team"})
+    
+    ;; Find all backdoor detections
+    (let [changes (verification-db/find-verification-changes-by-reason
+                   help/*db*
+                   verification-db/CHANGE-REASON-BACKDOOR-DETECTED
+                   10)]
+      (is (= 2 (count changes)))
+      (is (every? #(= verification-db/CHANGE-REASON-BACKDOOR-DETECTED (:change_reason %)) changes)))))
+
+(deftest test-find-verification-changes-by-action
+  (testing "Can find verification changes by action taken"
+    (add-test-jar help/*db*)
+    
+    (verification-db/add-jar-verification
+     help/*db*
+     {:group-name "org.clojars.testuser"
+      :jar-name "test-jar"
+      :version "1.0.0"
+      :verification-status verification-db/VERIFICATION-STATUS-FAILED
+      :change-reason verification-db/CHANGE-REASON-BACKDOOR-DETECTED
+      :action-taken verification-db/ACTION-TAKEN-JAR-DELETED
+      :changed-by "admin"})
+    
+    (let [changes (verification-db/find-verification-changes-by-action
+                   help/*db*
+                   verification-db/ACTION-TAKEN-JAR-DELETED
+                   10)]
+      (is (= 1 (count changes)))
+      (is (= verification-db/ACTION-TAKEN-JAR-DELETED (:action_taken (first changes)))))))
+
+

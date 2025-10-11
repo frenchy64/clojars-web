@@ -1,0 +1,95 @@
+{:change-reasons
+ {:initial_verification
+  {:description "Initial verification of a jar version"
+   :severity :info
+   :typical-actions [:none]}
+  
+  :reverification
+  {:description "Re-verification of a previously verified jar"
+   :severity :info
+   :typical-actions [:none :verification_upgraded :verification_downgraded]}
+  
+  :compromised_workflow
+  {:description "Build workflow or CI/CD pipeline has been compromised"
+   :severity :critical
+   :typical-actions [:verification_downgraded :jar_deleted :user_notified :cve_reported]}
+  
+  :hijacked_repo
+  {:description "Source repository has been hijacked or taken over"
+   :severity :critical
+   :typical-actions [:verification_downgraded :jar_deleted :user_notified :group_suspended]}
+  
+  :malicious_non_main_branch
+  {:description "Malicious code detected in non-main branch used for build"
+   :severity :high
+   :typical-actions [:verification_downgraded :user_notified :under_investigation]}
+  
+  :backdoor_detected
+  {:description "Backdoor or malicious code detected in the artifact"
+   :severity :critical
+   :typical-actions [:jar_deleted :cve_reported :user_notified :group_suspended]}
+  
+  :security_vulnerability
+  {:description "Security vulnerability discovered in the artifact"
+   :severity :high
+   :typical-actions [:cve_reported :user_notified :under_investigation]}
+  
+  :build_system_update
+  {:description "Update due to changes in build system or verification method"
+   :severity :info
+   :typical-actions [:none :verification_upgraded]}
+  
+  :policy_change
+  {:description "Change due to updated verification policies"
+   :severity :info
+   :typical-actions [:verification_downgraded :verification_upgraded]}
+  
+  :manual_review
+  {:description "Manual review by administrator or security team"
+   :severity :info
+   :typical-actions [:none :verification_upgraded :verification_downgraded]}
+  
+  :automated_scan
+  {:description "Result of automated security or verification scan"
+   :severity :info
+   :typical-actions [:none :verification_upgraded :verification_downgraded :under_investigation]}}
+ 
+ :actions-taken
+ {:none
+  {:description "No specific action taken, informational only"
+   :severity :info}
+  
+  :jar_deleted
+  {:description "Jar artifact has been deleted from the repository"
+   :severity :critical
+   :reversible false}
+  
+  :cve_reported
+  {:description "CVE (Common Vulnerabilities and Exposures) has been reported"
+   :severity :high
+   :reversible false}
+  
+  :user_notified
+  {:description "User or group owner has been notified of the issue"
+   :severity :info
+   :reversible false}
+  
+  :group_suspended
+  {:description "Entire group has been suspended from publishing"
+   :severity :critical
+   :reversible true}
+  
+  :verification_downgraded
+  {:description "Verification status has been downgraded to a lower trust level"
+   :severity :warning
+   :reversible true}
+  
+  :verification_upgraded
+  {:description "Verification status has been upgraded to a higher trust level"
+   :severity :info
+   :reversible true}
+  
+  :under_investigation
+  {:description "Issue is under investigation, temporary status"
+   :severity :warning
+   :reversible true}}}
