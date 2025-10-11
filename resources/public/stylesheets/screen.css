@@ -853,3 +853,46 @@ a.login-button:hover, a.login-button:focus {
   border: 1px solid #ffeeba;
   margin-top: 8px;
 }
+
+/* Verification history table */
+.verification-history {
+  width: 100%;
+  font-size: 0.85em;
+  border-collapse: collapse;
+  margin-top: 10px;
+}
+
+.verification-history thead th {
+  text-align: left;
+  padding: 6px 4px;
+  border-bottom: 2px solid #ddd;
+  font-weight: 600;
+  color: #555;
+}
+
+.verification-history tbody td {
+  padding: 6px 4px;
+  border-bottom: 1px solid #eee;
+  vertical-align: middle;
+}
+
+.verification-history tbody tr:hover {
+  background-color: #f9f9f9;
+}
+
+.verification-history .verification-badge {
+  padding: 2px 6px;
+  font-size: 0.75em;
+  margin: 0;
+}
+
+.verification-history-intro {
+  margin: 8px 0 4px 0;
+  color: #666;
+}
+
+.verification-history-more {
+  margin: 8px 0;
+  color: #666;
+  font-style: italic;
+}

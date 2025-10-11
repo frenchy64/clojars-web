@@ -296,11 +296,23 @@ Comprehensive test coverage including:
 
 This implementation enables future features:
 
-1. **Web UI**: Display verification history on jar pages *(Not yet implemented)*
+1. **Web UI**: Display verification history on jar pages *(✅ IMPLEMENTED)*
 2. **API Endpoints**: REST API for history queries *(✅ IMPLEMENTED)*
 3. **Notifications**: Email/RSS when verification changes *(Not yet implemented)*
 4. **Reports**: Security reports on verification changes *(Not yet implemented)*
 5. **Automation**: Batch processing for retroactive analysis *(Not yet implemented)*
+
+### Implemented: Web UI for Verification History
+
+Added verification history display to jar detail pages:
+
+**New function:** `verification-history-display` in `src/clojars/web/jar.clj`
+- Shows up to 10 most recent verification changes in a table format
+- Displays: date, status badge, change reason, and action taken
+- Automatically appears in the sidebar when history exists for a jar version
+- Styled with responsive CSS in `resources/public/stylesheets/screen.css`
+
+The history table appears between the current verification info and verification metrics, providing users with a clear timeline of all verification status changes.
 
 ### Implemented: API Endpoints for History Queries
 
@@ -356,11 +368,6 @@ curl https://clojars.org/api/verification/changes/by-action/jar_deleted
 ### Still To Implement (for future work)
 
 The following enhancements from lines 295-303 remain:
-
-1. **Web UI**: Display verification history on jar pages
-   - Add history section to jar detail pages
-   - Show timeline of verification changes
-   - Highlight security-related changes
 
 3. **Notifications**: Email/RSS when verification changes
    - Email alerts for verification downgrades

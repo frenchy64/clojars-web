@@ -355,6 +355,35 @@
      (when-let [notes (:verification_notes verification)]
        [:p.verification-notes [:small notes]]))))
 
+(defn- verification-history-display
+  "Display verification history for a jar version."
+  [db jar]
+  (let [history (verification-db/find-jar-verification-history
+                 db
+                 (:group_name jar)
+                 (:jar_name jar)
+                 (:version jar))]
+    (when (seq history)
+      (list
+       [:h4 "Verification History"]
+       [:p.verification-history-intro [:small "Changes to this version's verification status:"]]
+       [:table.verification-history
+        [:thead
+         [:tr
+          [:th "Date"]
+          [:th "Status"]
+          [:th "Reason"]
+          [:th "Action"]]]
+        [:tbody
+         (for [entry (take 10 history)]
+           [:tr
+            [:td [:small (simple-date (:changed_at entry))]]
+            [:td (verification-badge {:verification_status (:verification_status entry)})]
+            [:td [:small (or (:change_reason entry) "-")]]
+            [:td [:small (or (:action_taken entry) "-")]]])]]
+       (when (> (count history) 10)
+         [:p.verification-history-more [:small (format "...and %d more changes" (- (count history) 10))]])))))
+
 (defn- verification-metrics-display
   "Display verification metrics for all versions of a jar."
   [db jar]
@@ -424,6 +453,8 @@
        [:li (versions jar recent-versions version-count)]
        (when-let [verification-display (verification-info db jar)]
          [:li.verification-info verification-display])
+       (when-let [history-display (verification-history-display db jar)]
+         [:li.verification-history history-display])
        (when-let [metrics-display (verification-metrics-display db jar)]
          [:li.verification-metrics metrics-display])
        (when-let [dependencies (dependencies db jar)]
