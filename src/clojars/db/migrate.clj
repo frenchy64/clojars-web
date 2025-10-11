@@ -162,6 +162,14 @@
                    "create index jar_verifications_idx0 on jar_verifications (group_name, jar_name)"
                    "create index jar_verifications_idx1 on jar_verifications (verification_status)"]))
 
+(defn- add-verification-settings-to-group-settings
+  [tx]
+  (db/do-commands tx
+                  [(str "alter table group_settings "
+                        "add column minimum_verification_method text default null, "
+                        "add column verification_grandfathered bool default false, "
+                        "add column verification_last_analyzed timestamp default null")]))
+
 (def migrations
   [#'initial-schema
    #'add-deploy-tokens-table
@@ -179,7 +187,8 @@
    #'rename-groups-to-permissions
    #'add-scope-to-permissions
    #'add-created-index-to-jars-table
-   #'add-jar-verifications-table])
+   #'add-jar-verifications-table
+   #'add-verification-settings-to-group-settings])
 
 (defn migrate [db]
   (db/do-commands db

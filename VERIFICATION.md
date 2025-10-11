@@ -562,22 +562,6 @@ For immediate deployment without delay, a post-deployment verification process:
    - Request source-match verification
    - Provide manual verification if needed
 
-#### For Private/Closed-Source Projects
-
-1. **Self-Hosted CI with Public Build Pages**: Set up public build results
-   - Jenkins with anonymous read access
-   - GitLab with public pipelines
-   - Store build URLs as attestation
-
-2. **Manual Verification Process**: Work with Clojars team
-   - Provide build evidence
-   - Get manual verification approval
-
-3. **Source-Only Attestation**: For consulting/commercial projects:
-   - If you can make the source repository public (even temporarily)
-   - Enable source-match verification
-   - Then make repository private again (verification is cached)
-
 ### Trust Levels and Verification Methods
 
 Different verification methods provide different levels of trust:
@@ -595,6 +579,259 @@ Different verification methods provide different levels of trust:
 | `manual-verified` | Low-Medium | Manual review by Clojars team |
 | `unverified-grandfathered` | Low | Pre-dates verification system |
 | `unverified` | Lowest | No verification attempted |
+
+### Per-Project Verification Requirements
+
+Clojars implements a per-project minimum verification level system that balances security with user experience. Each project has a **minimum required verification method** for new deployments, which is determined automatically through grandfathering analysis or can be configured by maintainers.
+
+#### Automatic Minimum Verification Level
+
+When a new artifact is deployed, Clojars determines the minimum verification level based on:
+
+1. **For New Projects** (no previous deployments):
+   - Default minimum: `source-match` or `source-match-approx`
+   - Rationale: New projects should meet modern security standards
+   - No additional setup required from users if repository info is in POM
+
+2. **For Existing Projects** (have historical deployments):
+   - Analyze recent versions (last 5 versions or versions from last 2 years)
+   - Determine the project's pattern based on actual artifact contents
+   - Set minimum level to match historical practice
+   - Mark as `grandfathered: true` to allow future manual adjustment
+
+#### Grandfathering Analysis Logic
+
+The system analyzes historical artifacts to determine their verification capabilities:
+
+**Source-Only Projects**: All Clojure/ClojureScript source files in JARs exactly match repository
+- **Pattern**: 100% of non-META-INF files are source code from the repository
+- **Minimum Level**: `source-match` 
+- **Rationale**: Project has demonstrated reproducible, source-only builds
+- **User Impact**: No change needed; continue normal build process
+
+**Source-Match with Metadata Differences**: Source matches but timestamps/manifest differ
+- **Pattern**: All source files match, but JAR metadata (timestamps, build info) differs
+- **Minimum Level**: `source-match-approx`
+- **Rationale**: Project builds from source but build isn't deterministic
+- **User Impact**: No change needed; metadata differences are acceptable
+
+**Mixed Projects with Build Artifacts**: Clojure source matches but includes .class files
+- **Pattern**: Clojure/ClojureScript files match repository, but JAR also contains compiled .class files
+- **Minimum Level**: `partial-has-build-artifacts`
+- **Rationale**: Project includes compiled code from Java/other sources
+- **User Impact**: No change needed; lower trust level communicated to users
+- **Note**: If .class files are from dependencies (not project code), this is acceptable
+
+**Projects with AOT Compilation**: Contains compiled Clojure .class files
+- **Pattern**: JAR contains .class files compiled from project's Clojure source
+- **Minimum Level**: `partial-has-build-artifacts`
+- **Rationale**: AOT compilation is legitimate but reduces verifiability
+- **User Impact**: Consider making AOT optional if possible for higher verification level
+
+**Build Artifacts Without Source**: Contains .class files with no corresponding source
+- **Pattern**: .class files in JAR with no matching source in repository
+- **Minimum Level**: `attestation` (requires CI attestation)
+- **Rationale**: Cannot verify from source; requires build attestation
+- **User Impact**: Must add CI attestation to maintain deployment capability
+
+**Unable to Determine**: Repository info missing or inaccessible
+- **Pattern**: No SCM info in POM, private repository, or repository no longer exists
+- **Minimum Level**: `unverified-grandfathered`
+- **Rationale**: Cannot perform source verification; grandfather existing pattern
+- **User Impact**: Should add repository info to POM for future versions
+
+#### Verification Requirement Enforcement
+
+When deploying a new version:
+
+1. **Check Historical Minimum**: Look up the project's minimum verification level
+2. **Analyze Current Artifact**: Determine what verification methods are possible
+3. **Compare and Decide**:
+   - If artifact meets or exceeds minimum → **Allow deployment**
+   - If artifact fails to meet minimum → **Reject deployment with detailed message**
+
+**Example Rejection Message for Source-Only Project**:
+```
+Deployment rejected: Verification requirement not met
+
+Based on historical releases, Clojars has determined your project 
+"com.example/my-library" requires a minimum verification level of 
+"source-match" (source-only artifacts).
+
+Your current deployment includes the following files that prevent 
+source-match verification:
+  - com/example/MyClass.class (compiled Java class)
+  - com/example/core__init.class (AOT compiled Clojure)
+
+To resolve this issue:
+
+1. If these .class files are intentional:
+   - Visit https://clojars.org/groups/com.example to adjust your 
+     verification settings (note: this will lower your project's 
+     verification badge level)
+   
+2. If these .class files are accidental:
+   - Remove AOT compilation from your build (Leiningen: remove 
+     :aot from project.clj)
+   - Rebuild and redeploy
+   
+3. If you have build artifacts but use CI attestation:
+   - Add attestation URL to your deployment
+   - Use Clojars trusted GitHub Actions workflows
+
+For more information, see:
+https://github.com/clojars/clojars-web/blob/main/VERIFICATION.md
+```
+
+#### Configuration and Overrides
+
+Project maintainers can configure verification requirements through the Clojars web interface:
+
+**Group Settings Page**: `/groups/:group-name`
+- **Minimum Verification Level**: Dropdown to select required level
+- **Grandfathered**: Checkbox showing if current setting is from automatic analysis
+- **Last Analyzed**: Timestamp of last grandfathering analysis
+- **Re-analyze**: Button to re-run analysis on historical artifacts
+
+**Available Override Options**:
+- `source-match`: Require source-only artifacts
+- `source-match-approx`: Allow metadata differences
+- `partial-has-build-artifacts`: Allow compiled classes if Clojure source matches
+- `attestation`: Require any form of attestation (GitHub Actions, GitLab, etc.)
+- `unverified`: No verification required (not recommended; shows strong warning)
+
+**Effect of Changing Settings**:
+- Applies to all future deployments within the group
+- Does not affect already-deployed artifacts
+- Lowering requirements shows warning about reduced trust
+- Raising requirements may require build process changes
+
+#### Implementation Database Schema
+
+To support per-project verification requirements, extend the `group_settings` table:
+
+```sql
+ALTER TABLE group_settings 
+  ADD COLUMN minimum_verification_method text DEFAULT NULL,
+  ADD COLUMN verification_grandfathered bool DEFAULT false,
+  ADD COLUMN verification_last_analyzed timestamp DEFAULT NULL;
+```
+
+**Fields**:
+- `minimum_verification_method`: Required verification method (null = use automatic)
+- `verification_grandfathered`: Whether current setting is from automatic analysis
+- `verification_last_analyzed`: When grandfathering analysis last ran
+
+#### Grandfathering Analysis Algorithm
+
+**Step 1: Collect Recent Artifacts**
+```clojure
+(defn analyze-recent-artifacts [db group-name jar-name]
+  (let [recent-versions (db/recent-versions db group-name jar-name 5)
+        artifacts (map #(download-artifact %) recent-versions)]
+    artifacts))
+```
+
+**Step 2: Analyze Each Artifact**
+```clojure
+(defn analyze-artifact-contents [jar-file repo-url commit-tag]
+  (let [jar-contents (extract-jar-contents jar-file)
+        source-files (filter-source-files jar-contents)
+        class-files (filter-class-files jar-contents)
+        repo-source (clone-and-extract repo-url commit-tag)]
+    {:source-only? (empty? class-files)
+     :source-matches? (all-match? source-files repo-source)
+     :metadata-only-diff? (only-metadata-differs? jar-file repo-source)
+     :class-files-from-deps? (all-from-dependencies? class-files)
+     :has-aot-compilation? (has-compiled-clojure? class-files)}))
+```
+
+**Step 3: Determine Pattern**
+```clojure
+(defn determine-verification-pattern [analyses]
+  (let [all-source-only? (every? :source-only? analyses)
+        all-match? (every? :source-matches? analyses)
+        all-approx? (every? :metadata-only-diff? analyses)
+        has-build-artifacts? (some :class-files-from-deps? analyses)]
+    (cond
+      (and all-match? all-source-only?) :source-match
+      (and all-match? all-approx?) :source-match-approx
+      (and all-match? has-build-artifacts?) :partial-has-build-artifacts
+      :else :attestation-required)))
+```
+
+**Step 4: Set Minimum Level**
+```clojure
+(defn set-minimum-verification-level [db group-name pattern]
+  (db/update-group-settings 
+    db 
+    group-name
+    {:minimum_verification_method (name pattern)
+     :verification_grandfathered true
+     :verification_last_analyzed (now)}))
+```
+
+#### Edge Cases and Special Handling
+
+**1. Projects with Inconsistent History**
+- Some versions source-only, others with build artifacts
+- **Resolution**: Use most restrictive level that applies to majority (>60%)
+- **Notify**: Email maintainer about inconsistency detected
+
+**2. Projects That Changed Build Process**
+- Historical versions have different patterns than recent ones
+- **Resolution**: Only analyze last 5 versions or 2 years (whichever is less)
+- **Notify**: Maintainer can manually adjust if needed
+
+**3. Projects with Missing Repository Info**
+- Cannot perform source-match analysis
+- **Resolution**: Set to `attestation` if has attestation, else `unverified-grandfathered`
+- **Notify**: Encourage adding SCM info to POM
+
+**4. Projects That Temporarily Had Build Issues**
+- One version failed source-match due to error
+- **Resolution**: Ignore outliers (versions that don't match pattern of 80%+ of versions)
+- **Notify**: Flag for manual review if unsure
+
+**5. Multi-Module Projects**
+- Different modules might have different verification levels
+- **Resolution**: Group settings apply to entire group; set to most lenient level needed
+- **Notify**: Document per-module verification in project notes
+
+#### Migration Plan for Existing Projects
+
+**Phase 1: Analysis Period (3 months)**
+- Run grandfathering analysis on all existing projects
+- Store results but don't enforce
+- Show "preview" on group settings page
+- Email maintainers with analysis results
+
+**Phase 2: Soft Enforcement (3 months)**
+- Enforce for new projects (created after Phase 2 start)
+- Show warnings (but allow) for existing projects
+- Track violations for monitoring
+
+**Phase 3: Full Enforcement**
+- Enforce for all projects
+- Provide grace period for fixing issues
+- Support team available to help with problems
+
+#### Benefits of This Approach
+
+**For Security**:
+- New projects start with high verification standards
+- Existing projects can't downgrade without explicit action
+- Clear communication about trust levels
+
+**For Users**:
+- No surprise breakages for existing workflows
+- Clear path to higher verification levels
+- Flexible enough to handle real-world scenarios
+
+**For Maintainers**:
+- Automatic reasonable defaults
+- Manual override when needed
+- Transparent and documentable decisions
 
 ### Implementation Roadmap
 
