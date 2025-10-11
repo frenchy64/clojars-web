@@ -62,6 +62,9 @@
 (def ACTION-TAKEN-VERIFICATION-UPGRADED "verification_upgraded")
 (def ACTION-TAKEN-UNDER-INVESTIGATION "under_investigation")
 
+;; Forward declaration for add-jar-verification-history
+(declare add-jar-verification-history)
+
 (defn add-jar-verification
   "Record verification status for a jar version.
    Uses UPSERT to handle cases where a verification record already exists.
