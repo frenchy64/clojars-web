@@ -57,7 +57,7 @@
   :transitive_dependency_compromised
   {:description "A dependency used to build this jar was compromised"
    :severity :high
-   :typical-actions [:under_investigation :verification_downgraded :flagged_for_review]}
+   :typical-actions [:under_investigation :verification_downgraded :flagged_for_review :jar_updated]}
   
   :provenance_unchanged_despite_compromised_dep
   {:description "Source-identical build despite compromised dependency (build artifacts not affected)"
@@ -111,5 +111,10 @@
   
   :audit_log_updated
   {:description "Audit log entry added without status change (informational)"
+   :severity :info
+   :reversible false}
+  
+  :jar_updated
+  {:description "Jar artifact has been rebuilt and updated with more verified build (e.g., after upstream dependency was found to poison the build)"
    :severity :info
    :reversible false}}}

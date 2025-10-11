@@ -65,6 +65,7 @@
 (def ACTION-TAKEN-UNDER-INVESTIGATION "under_investigation")
 (def ACTION-TAKEN-FLAGGED-FOR-REVIEW "flagged_for_review")
 (def ACTION-TAKEN-AUDIT-LOG-UPDATED "audit_log_updated")
+(def ACTION-TAKEN-JAR-UPDATED "jar_updated")
 
 ;; Forward declaration for add-jar-verification-history
 (declare add-jar-verification-history)

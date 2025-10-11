@@ -62,6 +62,9 @@ Actions performed in response to verification changes:
 - `verification_downgraded` - Status downgraded to lower trust level (reversible)
 - `verification_upgraded` - Status upgraded to higher trust level (reversible)
 - `under_investigation` - Issue under investigation (temporary status, reversible)
+- `flagged_for_review` - Flagged for manual review by maintainers (reversible)
+- `audit_log_updated` - Audit log entry added without status change (informational)
+- `jar_updated` - Jar artifact rebuilt and updated with more verified build (irreversible)
 
 ## Usage Examples
 
@@ -99,6 +102,24 @@ Actions performed in response to verification changes:
   vdb/CHANGE-REASON-COMPROMISED-WORKFLOW
   vdb/ACTION-TAKEN-USER-NOTIFIED
   "security-team")
+```
+
+### Rebuilding a jar after upstream dependency poisoning
+
+```clojure
+;; After determining an upstream dependency poisoned the build,
+;; maintainers can rebuild in a more verified fashion and update the jar
+(vdb/update-jar-verification-with-history
+  db
+  "com.example"
+  "my-library"
+  "1.0.0"
+  {:verification_status vdb/VERIFICATION-STATUS-VERIFIED
+   :verification_method vdb/VERIFICATION-METHOD-SOURCE-MATCH
+   :verification_notes "Jar rebuilt with verified dependencies after detecting upstream poisoning"}
+  vdb/CHANGE-REASON-TRANSITIVE-DEPENDENCY-COMPROMISED
+  vdb/ACTION-TAKEN-JAR-UPDATED
+  "clojars-maintainer")
 ```
 
 ### Querying verification history
