@@ -51,6 +51,8 @@
 (def CHANGE-REASON-POLICY-CHANGE "policy_change")
 (def CHANGE-REASON-MANUAL-REVIEW "manual_review")
 (def CHANGE-REASON-AUTOMATED-SCAN "automated_scan")
+(def CHANGE-REASON-TRANSITIVE-DEPENDENCY-COMPROMISED "transitive_dependency_compromised")
+(def CHANGE-REASON-PROVENANCE-UNCHANGED-DESPITE-COMPROMISED-DEP "provenance_unchanged_despite_compromised_dep")
 
 ;; Actions taken - what action was performed in response
 (def ACTION-TAKEN-NONE "none")
@@ -61,6 +63,8 @@
 (def ACTION-TAKEN-VERIFICATION-DOWNGRADED "verification_downgraded")
 (def ACTION-TAKEN-VERIFICATION-UPGRADED "verification_upgraded")
 (def ACTION-TAKEN-UNDER-INVESTIGATION "under_investigation")
+(def ACTION-TAKEN-FLAGGED-FOR-REVIEW "flagged_for_review")
+(def ACTION-TAKEN-AUDIT-LOG-UPDATED "audit_log_updated")
 
 ;; Forward declaration for add-jar-verification-history
 (declare add-jar-verification-history)

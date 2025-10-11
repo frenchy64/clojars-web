@@ -52,7 +52,17 @@
   :automated_scan
   {:description "Result of automated security or verification scan"
    :severity :info
-   :typical-actions [:none :verification_upgraded :verification_downgraded :under_investigation]}}
+   :typical-actions [:none :verification_upgraded :verification_downgraded :under_investigation]}
+  
+  :transitive_dependency_compromised
+  {:description "A dependency used to build this jar was compromised"
+   :severity :high
+   :typical-actions [:under_investigation :verification_downgraded :flagged_for_review]}
+  
+  :provenance_unchanged_despite_compromised_dep
+  {:description "Source-identical build despite compromised dependency (build artifacts not affected)"
+   :severity :info
+   :typical-actions [:none :audit_log_updated]}}
  
  :actions-taken
  {:none
@@ -92,4 +102,14 @@
   :under_investigation
   {:description "Issue is under investigation, temporary status"
    :severity :warning
-   :reversible true}}}
+   :reversible true}
+  
+  :flagged_for_review
+  {:description "Flagged for manual review by maintainers (e.g., contains build artifacts and has compromised transitive deps)"
+   :severity :warning
+   :reversible true}
+  
+  :audit_log_updated
+  {:description "Audit log entry added without status change (informational)"
+   :severity :info
+   :reversible false}}}

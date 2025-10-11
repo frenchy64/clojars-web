@@ -162,6 +162,41 @@ The changes are backward compatible:
 ## Future Enhancements
 
 Potential future enhancements based on this system:
+
+### Transitive Dependency Compromise Handling
+
+When a compromised jar (A) was used to build another jar (B), the system can be extended to:
+
+1. **Track build-time dependencies**: Store the SHA hashes of all dependencies used during build
+   - This data can be sourced from attested build output
+   - Enables transitive compromise detection
+
+2. **Automated transitive analysis**: When jar A is downgraded:
+   - Find all jars built using A (iteratively/transitively)
+   - For jars that are source-identical with no build artifacts:
+     - Add audit log entry with reason `CHANGE-REASON-PROVENANCE-UNCHANGED-DESPITE-COMPROMISED-DEP`
+     - Action: `ACTION-TAKEN-AUDIT-LOG-UPDATED`
+     - Note: Provenance unchanged because build artifacts are trivially reproducible
+   - For jars containing build artifacts:
+     - Flag for manual review with reason `CHANGE-REASON-TRANSITIVE-DEPENDENCY-COMPROMISED`
+     - Action: `ACTION-TAKEN-FLAGGED-FOR-REVIEW`
+     - Requires thorough maintainer review if automated reproducibility checks unavailable
+
+3. **Verification level promotion**: Use this to incentivize higher verification levels
+   - Homepage could showcase latest fully verified projects
+   - Track projects making progress toward full verification
+   - Projects at maximum verification levels are more resilient to transitive compromises
+
+**Reason codes added for future use:**
+- `CHANGE-REASON-TRANSITIVE-DEPENDENCY-COMPROMISED`
+- `CHANGE-REASON-PROVENANCE-UNCHANGED-DESPITE-COMPROMISED-DEP`
+
+**Action codes added for future use:**
+- `ACTION-TAKEN-FLAGGED-FOR-REVIEW`
+- `ACTION-TAKEN-AUDIT-LOG-UPDATED`
+
+### Other Planned Enhancements
+
 1. Web UI to view verification history for jars
 2. RSS/Atom feeds for verification changes
 3. Email notifications for verification downgrades
