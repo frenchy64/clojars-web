@@ -296,11 +296,86 @@ Comprehensive test coverage including:
 
 This implementation enables future features:
 
+1. **Web UI**: Display verification history on jar pages *(Not yet implemented)*
+2. **API Endpoints**: REST API for history queries *(✅ IMPLEMENTED)*
+3. **Notifications**: Email/RSS when verification changes *(Not yet implemented)*
+4. **Reports**: Security reports on verification changes *(Not yet implemented)*
+5. **Automation**: Batch processing for retroactive analysis *(Not yet implemented)*
+
+### Implemented: API Endpoints for History Queries
+
+Added comprehensive REST API endpoints for querying verification history:
+
+#### New Endpoints
+
+1. **GET `/api/artifacts/:group/:artifact/:version/verification/history`**
+   - Get full verification history for a specific jar version
+   - Returns all historical changes with reasons and actions
+
+2. **GET `/api/artifacts/:group/:artifact/verification/history`**
+   - Get verification history for all versions of a jar
+   - Useful for seeing the complete verification timeline of a project
+
+3. **GET `/api/verification/changes/by-reason/:reason`**
+   - Query all verification changes by reason code
+   - Optional `limit` parameter (default: 50, max: 100)
+   - Example: `/api/verification/changes/by-reason/compromised_workflow?limit=100`
+
+4. **GET `/api/verification/changes/by-action/:action`**
+   - Query all verification changes by action taken
+   - Optional `limit` parameter (default: 50, max: 100)
+   - Example: `/api/verification/changes/by-action/jar_deleted?limit=50`
+
+#### Response Format
+
+All history endpoints return JSON/EDN/YAML with fields:
+- `verification_status` - Status at that point in time
+- `verification_method` - Method used
+- `change_reason` - Why the change was made
+- `action_taken` - Action performed
+- `changed_by` - Who made the change
+- `changed_at` - When it was made
+- Plus all verification metadata (repo_url, commit_sha, etc.)
+
+#### Example Usage
+
+```bash
+# Get history for a specific version
+curl https://clojars.org/api/artifacts/com.example/my-lib/1.0.0/verification/history
+
+# Get all history for all versions
+curl https://clojars.org/api/artifacts/com.example/my-lib/verification/history
+
+# Find all compromised workflow incidents
+curl https://clojars.org/api/verification/changes/by-reason/compromised_workflow
+
+# Find all deleted jars
+curl https://clojars.org/api/verification/changes/by-action/jar_deleted
+```
+
+### Still To Implement (for future work)
+
+The following enhancements from lines 295-303 remain:
+
 1. **Web UI**: Display verification history on jar pages
-2. **API Endpoints**: REST API for history queries
+   - Add history section to jar detail pages
+   - Show timeline of verification changes
+   - Highlight security-related changes
+
 3. **Notifications**: Email/RSS when verification changes
+   - Email alerts for verification downgrades
+   - RSS feed for verification changes
+   - User subscriptions to specific jars
+
 4. **Reports**: Security reports on verification changes
+   - Dashboard for security team
+   - Statistics on compromise incidents
+   - Trend analysis
+
 5. **Automation**: Batch processing for retroactive analysis
+   - Background jobs to scan jars
+   - Automated transitive dependency analysis
+   - Scheduled security audits
 
 ## Conclusion
 

@@ -142,6 +142,87 @@ When a security issue is discovered in a build system or attested workflow (as m
     "security-audit-bot"))
 ```
 
+## API Endpoints
+
+The system provides REST API endpoints for querying verification history:
+
+### Get History for Specific Version
+
+```bash
+GET /api/artifacts/:group/:artifact/:version/verification/history
+```
+
+Returns the complete verification history for a specific jar version.
+
+**Example:**
+```bash
+curl https://clojars.org/api/artifacts/com.example/my-lib/1.0.0/verification/history
+```
+
+**Response:**
+```json
+{
+  "history": [
+    {
+      "verification_status": "failed",
+      "verification_method": "source-match",
+      "change_reason": "compromised_workflow",
+      "action_taken": "verification_downgraded",
+      "changed_by": "security-audit-bot",
+      "changed_at": "2025-10-11T10:30:00Z",
+      "verification_notes": "Used compromised workflow"
+    },
+    {
+      "verification_status": "verified",
+      "verification_method": "source-match",
+      "change_reason": "initial_verification",
+      "action_taken": "none",
+      "changed_by": "automation-bot",
+      "changed_at": "2025-01-15T14:20:00Z"
+    }
+  ]
+}
+```
+
+### Get History for All Versions
+
+```bash
+GET /api/artifacts/:group/:artifact/verification/history
+```
+
+Returns verification history for all versions of a jar.
+
+### Query by Reason Code
+
+```bash
+GET /api/verification/changes/by-reason/:reason?limit=50
+```
+
+Find all verification changes with a specific reason code.
+
+**Example:**
+```bash
+# Find all compromised workflow incidents
+curl https://clojars.org/api/verification/changes/by-reason/compromised_workflow?limit=100
+```
+
+### Query by Action Code
+
+```bash
+GET /api/verification/changes/by-action/:action?limit=50
+```
+
+Find all verification changes where a specific action was taken.
+
+**Example:**
+```bash
+# Find all deleted jars
+curl https://clojars.org/api/verification/changes/by-action/jar_deleted?limit=50
+```
+
+**Parameters:**
+- `limit` (optional): Number of results to return (default: 50, max: 100)
+
 ## Migration
 
 The new `jar_verification_history` table is added via database migration:

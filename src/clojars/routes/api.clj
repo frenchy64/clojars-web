@@ -105,6 +105,58 @@
                              verifications)}))
     (not-found nil)))
 
+(defn- get-verification-history
+  "Get verification history for a specific jar version."
+  [db group-id artifact-id version]
+  (if (db/jar-exists db group-id artifact-id)
+    (let [history (verification-db/find-jar-verification-history db group-id artifact-id version)]
+      (ring.util/response
+       {:history (mapv #(select-keys % [:verification_status :verification_method
+                                         :repo_url :commit_sha :commit_tag
+                                         :attestation_url :reproducibility_script_url
+                                         :verification_notes :change_reason :action_taken
+                                         :changed_by :changed_at])
+                       history)}))
+    (not-found nil)))
+
+(defn- get-verification-history-all-versions
+  "Get verification history for all versions of a jar."
+  [db group-id artifact-id]
+  (if (db/jar-exists db group-id artifact-id)
+    (let [history (verification-db/find-jar-verification-history-all-versions db group-id artifact-id)]
+      (ring.util/response
+       {:history (mapv #(select-keys % [:version :verification_status :verification_method
+                                         :repo_url :commit_sha :commit_tag
+                                         :attestation_url :reproducibility_script_url
+                                         :verification_notes :change_reason :action_taken
+                                         :changed_by :changed_at])
+                       history)}))
+    (not-found nil)))
+
+(defn- get-verification-changes-by-reason
+  "Get verification changes by reason code."
+  [db reason limit]
+  (let [limit-int (try (Integer/parseInt (or limit "50")) (catch Exception _ 50))
+        limit-capped (min limit-int 100)]
+    (ring.util/response
+     {:changes (mapv #(select-keys % [:group_name :jar_name :version
+                                       :verification_status :verification_method
+                                       :change_reason :action_taken
+                                       :changed_by :changed_at])
+                     (verification-db/find-verification-changes-by-reason db reason limit-capped))})))
+
+(defn- get-verification-changes-by-action
+  "Get verification changes by action taken."
+  [db action limit]
+  (let [limit-int (try (Integer/parseInt (or limit "50")) (catch Exception _ 50))
+        limit-capped (min limit-int 100)]
+    (ring.util/response
+     {:changes (mapv #(select-keys % [:group_name :jar_name :version
+                                       :verification_status :verification_method
+                                       :change_reason :action_taken
+                                       :changed_by :changed_at])
+                     (verification-db/find-verification-changes-by-action db action limit-capped))})))
+
 (defn handler [db stats]
   (compojure/routes
    (context "/api" []
@@ -135,6 +187,21 @@
                   :group-id #"[^/]+"
                   :artifact-id #"[^/]+"] [group-id artifact-id]
                  (get-all-verifications db group-id artifact-id))
+            (GET ["/artifacts/:group-id/:artifact-id/:version/verification/history"
+                  :group-id #"[^/]+"
+                  :artifact-id #"[^/]+"
+                  :version #"[^/]+"] [group-id artifact-id version]
+                 (get-verification-history db group-id artifact-id version))
+            (GET ["/artifacts/:group-id/:artifact-id/verification/history"
+                  :group-id #"[^/]+"
+                  :artifact-id #"[^/]+"] [group-id artifact-id]
+                 (get-verification-history-all-versions db group-id artifact-id))
+            (GET ["/verification/changes/by-reason/:reason"
+                  :reason #"[^/]+"] [reason limit]
+                 (get-verification-changes-by-reason db reason limit))
+            (GET ["/verification/changes/by-action/:action"
+                  :action #"[^/]+"] [action limit]
+                 (get-verification-changes-by-action db action limit))
             (GET ["/release-feed"] [from]
                  (get-release-feed db from))
             (GET "/users/:username" [username]
