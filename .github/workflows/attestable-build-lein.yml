@@ -1,0 +1,614 @@
+# Clojars Reusable Attestable Build Workflow for Leiningen Projects
+#
+# This is a reusable workflow maintained by Clojars that provides secure, reproducible
+# builds with full provenance tracking. Clojars trusts and accepts attestations from this workflow.
+#
+# SUPPORTED LEININGEN VERSIONS:
+# - 2.12.0 (default)
+#
+# USAGE: Call this workflow from your repository's workflow:
+#
+# ```yaml
+# name: Release
+# on:
+#   push:
+#     tags: ['v*']
+# jobs:
+#   build:
+#     uses: clojars/clojars-web/.github/workflows/attestable-build-lein.yml@main
+#     with:
+#       java-version: '21'
+#       lein-version: '2.12.0'
+# ```
+#
+# DEPLOYMENT: After the workflow completes, download and deploy the attested artifacts.
+#
+# For SINGLE JAR projects:
+# ```yaml
+# jobs:
+#   build:
+#     uses: clojars/clojars-web/.github/workflows/attestable-build-lein.yml@main
+#     with:
+#       java-version: '21'
+#       lein-version: '2.12.0'
+#   
+#   deploy:
+#     needs: build
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Download attested artifacts from build job
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: attested-jar
+#           path: artifacts/
+#       
+#       - name: Deploy to Clojars
+#         run: |
+#           JAR_FILE=$(find artifacts/ -name "*.jar" -type f | head -n 1)
+#           POM_FILE=$(find artifacts/ -name "*.pom" -o -name "pom.xml" | head -n 1)
+#           mvn deploy:deploy-file \
+#             -Dfile="$JAR_FILE" \
+#             -DpomFile="$POM_FILE" \
+#             -DrepositoryId=clojars \
+#             -Durl=https://repo.clojars.org
+#         env:
+#           CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
+#           CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}
+# ```
+#
+# For MULTIPLE JARs (e.g., parent project with submodules):
+# ```yaml
+# jobs:
+#   build:
+#     uses: clojars/clojars-web/.github/workflows/attestable-build-lein.yml@main
+#     with:
+#       java-version: '21'
+#       lein-version: '2.12.0'
+#   
+#   deploy:
+#     needs: build
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Download attested artifacts from build job
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: attested-jar
+#           path: artifacts/
+#       
+#       - name: Deploy all JARs to Clojars
+#         run: |
+#           # Deploy each JAR file found
+#           for JAR_FILE in $(find artifacts/ -name "*.jar" -type f); do
+#             JAR_DIR=$(dirname "$JAR_FILE")
+#             JAR_BASE=$(basename "$JAR_FILE" .jar)
+#             # Find matching POM
+#             POM_FILE=""
+#             [ -f "$JAR_DIR/$JAR_BASE.pom" ] && POM_FILE="$JAR_DIR/$JAR_BASE.pom"
+#             [ -f "$JAR_DIR/pom.xml" ] && POM_FILE="$JAR_DIR/pom.xml"
+#             if [ -z "$POM_FILE" ]; then
+#               echo "No POM found for $JAR_FILE, skipping"
+#               continue
+#             fi
+#             echo "Deploying $JAR_FILE with $POM_FILE"
+#             mvn deploy:deploy-file \
+#               -Dfile="$JAR_FILE" \
+#               -DpomFile="$POM_FILE" \
+#               -DrepositoryId=clojars \
+#               -Durl=https://repo.clojars.org
+#           done
+#         env:
+#           CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
+#           CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}
+# ```
+#
+# This workflow uses a multi-job pipeline to:
+# 1. Download and verify dependencies in isolation
+# 2. Build artifacts offline with verified dependencies
+# 3. Analyze build provenance and verify all source files
+# 4. Generate attestation ONLY after verification passes
+# 5. Upload attested artifacts for deployment
+#
+# Note: This workflow does NOT deploy to Clojars automatically.
+# Deployment should only happen after full attestation is complete and verified.
+
+name: Attestable Leiningen Build (Clojars Trusted)
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: 'Java version to use for the build'
+        required: false
+        default: '21'
+        type: string
+      lein-version:
+        description: 'Leiningen version to use (supported: 2.12.0)'
+        required: false
+        default: '2.12.0'
+        type: string
+
+env:
+  # Pinned Leiningen version for reproducibility
+  LEIN_VERSION: ${{ inputs.lein-version }}
+  # Immutable URL for the lein installer (pinned to version tag, not 'stable' branch)
+  LEIN_INSTALLER_URL: "https://raw.githubusercontent.com/technomancy/leiningen/${{ inputs.lein-version }}/bin/lein"
+  # SHA256 checksums for supported Leiningen installer versions
+  LEIN_INSTALLER_2_12_0_SHA256: "f8e1266c0c78c08bd4af6e111889ecc316c9dd56d1e8645bbee6c1703d351bc3"
+  # Profile configuration to exclude user, test, and dev profiles for reproducibility
+  LEIN_PROFILES: "with-profile -user,-test,-dev"
+
+jobs:
+  # Job 1: Download and cache dependencies in isolation
+  prepare-dependencies:
+    runs-on: ubuntu-latest
+    outputs:
+      deps-hash: ${{ steps.cache-deps.outputs.hash }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '${{ inputs.java-version }}'
+          distribution: 'temurin'
+      
+      - name: Download and verify Leiningen installer
+        run: |
+          # Download the official Leiningen installer script from immutable version tag
+          curl -sL "$LEIN_INSTALLER_URL" -o lein
+          
+          # Select the correct checksum based on the Leiningen version
+          case "$LEIN_VERSION" in
+            2.12.0)
+              EXPECTED_SHA256="$LEIN_INSTALLER_2_12_0_SHA256"
+              ;;
+            *)
+              echo "ERROR: Unsupported Leiningen version: $LEIN_VERSION"
+              echo "Supported versions: 2.12.0"
+              exit 1
+              ;;
+          esac
+          
+          # Verify the SHA256 checksum of the installer
+          echo "$EXPECTED_SHA256  lein" | sha256sum -c - || {
+            echo "ERROR: Leiningen installer checksum verification failed!"
+            echo "Expected: $EXPECTED_SHA256"
+            echo "Got: $(sha256sum lein | cut -d' ' -f1)"
+            exit 1
+          }
+          
+          # Make executable and move to PATH
+          chmod +x lein
+          mkdir -p ~/.local/bin
+          mv lein ~/.local/bin/
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          
+          # Note: The lein installer contains its own checksum (LEIN_CHECKSUM)
+          # that verifies the lein uberjar on first call. This is at:
+          # export LEIN_CHECKSUM='b721a573af631784f27ccb52e719e6d1287d9d3951ad56d316d38f7ecfa81aa2'
+      
+      - name: Download dependencies
+        run: |
+          # Download all dependencies with minimal profiles
+          lein $LEIN_PROFILES deps
+          
+          echo "Dependencies downloaded to ~/.m2/repository"
+      
+      - name: Identify required dependencies
+        run: |
+          # Get the classpath to see which JARs are actually used
+          CLASSPATH=$(lein $LEIN_PROFILES classpath)
+          
+          # Parse the classpath to find all JAR files
+          echo "$CLASSPATH" | tr ':' '\n' | grep '\.jar$' > /tmp/required-jars.txt
+          
+          # Also capture dependency tree for reference
+          lein $LEIN_PROFILES deps :tree > /tmp/deps-tree.txt
+          
+          echo "Found $(wc -l < /tmp/required-jars.txt) required JAR files"
+      
+      - name: Clean unused dependencies from Maven cache
+        run: |
+          # Create a temporary directory for required dependencies
+          mkdir -p /tmp/minimal-m2/repository
+          
+          # Copy only the required JARs and their POMs to the minimal cache
+          while IFS= read -r jar_path; do
+            if [[ -f "$jar_path" ]]; then
+              # Get the relative path from ~/.m2/repository
+              rel_path="${jar_path#$HOME/.m2/repository/}"
+              target_dir="/tmp/minimal-m2/repository/$(dirname "$rel_path")"
+              mkdir -p "$target_dir"
+              cp "$jar_path" "$target_dir/"
+              
+              # Also copy the POM file if it exists
+              pom_path="${jar_path%.jar}.pom"
+              if [[ -f "$pom_path" ]]; then
+                cp "$pom_path" "$target_dir/"
+              fi
+            fi
+          done < /tmp/required-jars.txt
+          
+          # Also include Leiningen's own installation
+          if [[ -d "$HOME/.lein" ]]; then
+            cp -r "$HOME/.lein" /tmp/minimal-m2/
+          fi
+          
+          echo "Minimal Maven cache created at /tmp/minimal-m2"
+      
+      - name: Calculate checksums for all dependencies
+        id: cache-deps
+        run: |
+          # Calculate SHA256 for all files in the minimal cache
+          cd /tmp/minimal-m2
+          find . -type f -exec sha256sum {} \; | sort > /tmp/deps-checksums.txt
+          
+          # Calculate overall hash of all dependencies
+          DEPS_HASH=$(sha256sum /tmp/deps-checksums.txt | cut -d' ' -f1)
+          echo "hash=$DEPS_HASH" >> $GITHUB_OUTPUT
+          
+          echo "Dependencies checksum: $DEPS_HASH"
+          echo "Total files: $(wc -l < /tmp/deps-checksums.txt)"
+      
+      - name: Upload minimal dependency cache
+        uses: actions/upload-artifact@v4
+        with:
+          name: minimal-m2-cache
+          path: /tmp/minimal-m2/
+          retention-days: 1
+      
+      - name: Upload dependency checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: deps-checksums
+          path: |
+            /tmp/deps-checksums.txt
+            /tmp/required-jars.txt
+            /tmp/deps-tree.txt
+          retention-days: 1
+
+  # Job 2: Build artifacts offline with verified dependencies
+  build-artifacts:
+    runs-on: ubuntu-latest
+    needs: prepare-dependencies
+    outputs:
+      jar-file: ${{ steps.artifacts.outputs.jar-file }}
+      pom-file: ${{ steps.artifacts.outputs.pom-file }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download minimal dependency cache
+        uses: actions/download-artifact@v4
+        with:
+          name: minimal-m2-cache
+          path: /tmp/minimal-m2/
+      
+      - name: Download dependency checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: deps-checksums
+          path: /tmp/
+      
+      - name: Verify dependency checksums
+        run: |
+          cd /tmp/minimal-m2
+          
+          # Verify all files match their expected checksums
+          if ! sha256sum -c /tmp/deps-checksums.txt; then
+            echo "ERROR: Dependency checksum verification failed!"
+            echo "The downloaded dependencies do not match the expected checksums."
+            exit 1
+          fi
+          
+          echo "All dependency checksums verified successfully"
+      
+      - name: Restore Maven cache and Leiningen
+        run: |
+          # Restore the minimal Maven cache
+          mkdir -p ~/.m2
+          cp -r /tmp/minimal-m2/repository ~/.m2/
+          
+          # Restore Leiningen installation if present
+          if [[ -d /tmp/minimal-m2/.lein ]]; then
+            cp -r /tmp/minimal-m2/.lein ~/.lein
+          fi
+          
+          # Restore lein executable
+          mkdir -p ~/.local/bin
+          if [[ -f ~/.lein/bin/lein ]]; then
+            cp ~/.lein/bin/lein ~/.local/bin/
+          else
+            # Re-download if not in cache
+            curl -sL https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein -o ~/.local/bin/lein
+            echo "$LEIN_INSTALLER_SHA256  ~/.local/bin/lein" | sha256sum -c -
+          fi
+          chmod +x ~/.local/bin/lein
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '${{ inputs.java-version }}'
+          distribution: 'temurin'
+      
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Verify version matches tag
+        run: |
+          PROJECT_VERSION=$(lein $LEIN_PROFILES pprint :version | tr -d '"')
+          if [ "$PROJECT_VERSION" != "${{ steps.get_version.outputs.VERSION }}" ]; then
+            echo "ERROR: project.clj version ($PROJECT_VERSION) doesn't match tag (${{ steps.get_version.outputs.VERSION }})"
+            exit 1
+          fi
+      
+      - name: Build JAR and POM offline
+        env:
+          LEIN_OFFLINE: "true"
+        run: |
+          # Build the JAR offline using only cached dependencies
+          lein $LEIN_PROFILES jar
+          lein $LEIN_PROFILES pom
+          
+          echo "Build completed offline"
+      
+      - name: Find built artifacts
+        id: artifacts
+        run: |
+          JAR_FILE=$(find target -name "*.jar" -not -name "*-standalone.jar" | head -n 1)
+          POM_FILE="pom.xml"
+          
+          if [[ ! -f "$JAR_FILE" ]]; then
+            echo "ERROR: JAR file not found in target directory"
+            exit 1
+          fi
+          
+          if [[ ! -f "$POM_FILE" ]]; then
+            echo "ERROR: pom.xml not found"
+            exit 1
+          fi
+          
+          echo "jar-file=$JAR_FILE" >> $GITHUB_OUTPUT
+          echo "pom-file=$POM_FILE" >> $GITHUB_OUTPUT
+          echo "Found JAR: $JAR_FILE"
+          echo "Found POM: $POM_FILE"
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            ${{ steps.artifacts.outputs.jar-file }}
+            ${{ steps.artifacts.outputs.pom-file }}
+          retention-days: 90
+
+  # Job 3: Verify build provenance
+  verify-provenance:
+    runs-on: ubuntu-latest
+    needs: [prepare-dependencies, build-artifacts]
+    permissions:
+      contents: write  # For creating release
+      id-token: write  # For attestation
+      attestations: write  # For artifact attestation
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download minimal dependency cache
+        uses: actions/download-artifact@v4
+        with:
+          name: minimal-m2-cache
+          path: /tmp/minimal-m2/
+      
+      - name: Download dependency checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: deps-checksums
+          path: /tmp/
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: /tmp/artifacts/
+      
+      - name: Verify dependency checksums again
+        run: |
+          cd /tmp/minimal-m2
+          sha256sum -c /tmp/deps-checksums.txt || {
+            echo "ERROR: Dependency checksums do not match in verification job"
+            exit 1
+          }
+      
+      - name: Analyze build provenance
+        run: |
+          set -euo pipefail
+          
+          JAR_FILE=$(find /tmp/artifacts -name "*.jar" | head -n 1)
+          PROVENANCE_REPORT="/tmp/provenance-report.txt"
+          
+          echo "=== Build Provenance Report ===" > "$PROVENANCE_REPORT"
+          echo "Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$PROVENANCE_REPORT"
+          echo "JAR: $(basename "$JAR_FILE")" >> "$PROVENANCE_REPORT"
+          echo "JAR SHA256: $(sha256sum "$JAR_FILE" | cut -d' ' -f1)" >> "$PROVENANCE_REPORT"
+          echo "" >> "$PROVENANCE_REPORT"
+          
+          # Extract JAR contents
+          EXTRACT_DIR="/tmp/jar-contents"
+          mkdir -p "$EXTRACT_DIR"
+          cd "$EXTRACT_DIR"
+          unzip -q "$JAR_FILE"
+          
+          echo "=== File Provenance Analysis ===" >> "$PROVENANCE_REPORT"
+          echo "" >> "$PROVENANCE_REPORT"
+          
+          VERIFIED_COUNT=0
+          UNVERIFIED_CLJ_FILES=()
+          SUSPICIOUS_CLASS_FILES=()
+          
+          # Analyze each file in the JAR
+          while IFS= read -r -d '' jar_file; do
+            rel_path="${jar_file#$EXTRACT_DIR/}"
+            
+            # Skip META-INF files
+            if [[ "$rel_path" == META-INF/* ]]; then
+              continue
+            fi
+            
+            jar_checksum=$(sha256sum "$jar_file" | cut -d' ' -f1)
+            found_source=false
+            
+            # Check if file exists in source repository
+            if [[ -f "$GITHUB_WORKSPACE/$rel_path" ]]; then
+              repo_checksum=$(sha256sum "$GITHUB_WORKSPACE/$rel_path" | cut -d' ' -f1)
+              if [[ "$jar_checksum" == "$repo_checksum" ]]; then
+                echo "✓ $rel_path - matches source repository" >> "$PROVENANCE_REPORT"
+                ((VERIFIED_COUNT++))
+                found_source=true
+              fi
+            fi
+            
+            # If not in source, check dependencies for .class files or resources
+            if ! $found_source; then
+              found_in_dep=false
+              
+              # Search in dependency JARs
+              while IFS= read -r dep_jar; do
+                if unzip -l "$dep_jar" 2>/dev/null | grep -q " $rel_path$"; then
+                  # Extract and compare
+                  temp_extract="/tmp/dep-extract-$$"
+                  mkdir -p "$temp_extract"
+                  unzip -q "$dep_jar" "$rel_path" -d "$temp_extract" 2>/dev/null || continue
+                  
+                  if [[ -f "$temp_extract/$rel_path" ]]; then
+                    dep_checksum=$(sha256sum "$temp_extract/$rel_path" | cut -d' ' -f1)
+                    if [[ "$jar_checksum" == "$dep_checksum" ]]; then
+                      echo "✓ $rel_path - matches dependency $(basename "$dep_jar")" >> "$PROVENANCE_REPORT"
+                      ((VERIFIED_COUNT++))
+                      found_in_dep=true
+                      rm -rf "$temp_extract"
+                      break
+                    else
+                      # Checksum mismatch in dependency
+                      if [[ "$rel_path" == *.class ]]; then
+                        SUSPICIOUS_CLASS_FILES+=("$rel_path (checksum mismatch with $(basename "$dep_jar"))")
+                      fi
+                    fi
+                  fi
+                  rm -rf "$temp_extract"
+                fi
+              done < /tmp/required-jars.txt
+              
+              if ! $found_in_dep; then
+                if [[ "$rel_path" == *.clj || "$rel_path" == *.cljc || "$rel_path" == *.cljs ]]; then
+                  UNVERIFIED_CLJ_FILES+=("$rel_path")
+                  echo "✗ $rel_path - Clojure source file with unknown provenance" >> "$PROVENANCE_REPORT"
+                else
+                  echo "? $rel_path - provenance unknown" >> "$PROVENANCE_REPORT"
+                fi
+              fi
+            fi
+          done < <(find "$EXTRACT_DIR" -type f -print0)
+          
+          echo "" >> "$PROVENANCE_REPORT"
+          echo "=== Summary ===" >> "$PROVENANCE_REPORT"
+          echo "Verified files: $VERIFIED_COUNT" >> "$PROVENANCE_REPORT"
+          echo "Unverified .clj files: ${#UNVERIFIED_CLJ_FILES[@]}" >> "$PROVENANCE_REPORT"
+          echo "Suspicious .class files: ${#SUSPICIOUS_CLASS_FILES[@]}" >> "$PROVENANCE_REPORT"
+          
+          # Fail if unverified Clojure files found
+          if [[ ${#UNVERIFIED_CLJ_FILES[@]} -gt 0 ]]; then
+            echo "" >> "$PROVENANCE_REPORT"
+            echo "ERROR: Found Clojure source files with unknown provenance:" >> "$PROVENANCE_REPORT"
+            for file in "${UNVERIFIED_CLJ_FILES[@]}"; do
+              echo "  - $file" >> "$PROVENANCE_REPORT"
+            done
+            echo "" >> "$PROVENANCE_REPORT"
+            echo "To reproduce this error locally:" >> "$PROVENANCE_REPORT"
+            echo "1. Clone the repository and checkout: $GITHUB_SHA" >> "$PROVENANCE_REPORT"
+            echo "2. Build: lein $LEIN_PROFILES jar" >> "$PROVENANCE_REPORT"
+            echo "3. Extract and inspect the JAR contents" >> "$PROVENANCE_REPORT"
+            
+            cat "$PROVENANCE_REPORT"
+            exit 1
+          fi
+          
+          # Fail if suspicious class files found
+          if [[ ${#SUSPICIOUS_CLASS_FILES[@]} -gt 0 ]]; then
+            echo "" >> "$PROVENANCE_REPORT"
+            echo "ERROR: Found .class files with checksum mismatches (possible tampering):" >> "$PROVENANCE_REPORT"
+            for file in "${SUSPICIOUS_CLASS_FILES[@]}"; do
+              echo "  - $file" >> "$PROVENANCE_REPORT"
+            done
+            
+            cat "$PROVENANCE_REPORT"
+            exit 1
+          fi
+          
+          cat "$PROVENANCE_REPORT"
+      
+      - name: Upload provenance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: provenance-report
+          path: /tmp/provenance-report.txt
+          retention-days: 90
+      
+      - name: Attest build artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: /tmp/artifacts/*.jar
+      
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Create attestation metadata
+        run: |
+          cat > /tmp/attestation-metadata.json <<EOF
+          {
+            "workflow_run_id": "${{ github.run_id }}",
+            "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "commit_sha": "${{ github.sha }}",
+            "commit_tag": "${{ steps.get_version.outputs.TAG }}",
+            "repository": "${{ github.repository }}",
+            "attested_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "dependencies_hash": "${{ needs.prepare-dependencies.outputs.deps-hash }}"
+          }
+          EOF
+      
+      - name: Upload attested JAR and POM for deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: attested-jar
+          path: |
+            /tmp/artifacts/*.jar
+            /tmp/artifacts/pom.xml
+          retention-days: 90
+      
+      - name: Upload attestation metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: attestation-metadata
+          path: /tmp/attestation-metadata.json
+          retention-days: 90
+      
+      - name: Upload dependency checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-checksums
+          path: |
+            /tmp/deps-checksums.txt
+            /tmp/required-jars.txt
+            /tmp/deps-tree.txt
+          retention-days: 90
